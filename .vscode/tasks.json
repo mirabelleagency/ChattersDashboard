@@ -1,0 +1,48 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Backend: Uvicorn (root)",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "uvicorn", "app.main:app", "--reload", "--host", "127.0.0.1", "--port", "8000"],
+      "options": {
+        "cwd": "${workspaceFolder}\\of-chatters\\backend"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: Vite (root)",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "dev", "--", "--host", "127.0.0.1"],
+      "options": {
+        "cwd": "${workspaceFolder}\\of-chatters\\frontend"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Start Dev (Backend + Frontend) (root)",
+      "dependsOrder": "parallel",
+      "dependsOn": [
+        "Backend: Uvicorn (root)",
+        "Frontend: Vite (root)"
+      ]
+    },
+    {
+      "label": "Stop Dev Servers (root)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "$ports = 8000,5173; foreach ($p in $ports) { $pids = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique; foreach ($pid in $pids) { if ($pid) { try { Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue; Write-Host \"Stopped PID $pid on port $p\" } catch {} } } if (-not $pids) { Write-Host \"No process listening on port $p\" } }"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}
