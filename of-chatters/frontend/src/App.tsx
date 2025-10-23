@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import Dashboard from './pages/Dashboard'
 import Profile from './pages/Profile'
 import UserManagement from './pages/UserManagement'
+import Login from './pages/Login'
 import { getToken, setToken, clearToken, api } from './lib/api'
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -11,9 +12,6 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 
   useEffect(() => {
     async function checkAuth() {
-      // For development: bypass auth if no backend
-      // TODO: Connect to real backend authentication
-      
       // If we have an in-memory token, we're authenticated
       if (getToken()) {
         setIsAuthenticated(true)
@@ -22,9 +20,9 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 
       // Try to refresh using the cookie
       try {
-        const response = await fetch('/api/auth/refresh', { 
-          method: 'POST', 
-          credentials: 'include' 
+        const response = await fetch('/auth/refresh', {
+          method: 'POST',
+          credentials: 'include'
         })
         if (response.ok) {
           const data = await response.json()
@@ -35,14 +33,11 @@ function RequireAuth({ children }: { children: JSX.Element }) {
           }
         }
       } catch (error) {
-        // Refresh failed - for dev mode, allow access anyway
-        console.log('Auth check failed, allowing dev access')
+        // ignore
       }
-      
-      // For development: auto-authenticate
-      // Remove this in production
-      setToken('dev-token')
-      setIsAuthenticated(true)
+
+      // Not authenticated
+      setIsAuthenticated(false)
     }
 
     checkAuth()
@@ -57,11 +52,10 @@ function RequireAuth({ children }: { children: JSX.Element }) {
     )
   }
 
-  // Not authenticated - for production, redirect to login
-  // For now, allow access
-  // if (!isAuthenticated) {
-  //   return <Navigate to="/login" state={{ from: location }} replace />
-  // }
+  // Not authenticated - redirect to login
+  if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location }} replace />
+  }
 
   // Authenticated
   return children
@@ -71,29 +65,24 @@ function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [currentUser, setCurrentUser] = useState<{ username: string; is_admin?: boolean } | null>({
-    username: 'admin',
-    is_admin: true
-  })
+  const [currentUser, setCurrentUser] = useState<{ username: string; is_admin?: boolean } | null>(null)
 
   useEffect(() => {
     async function fetchCurrentUser() {
       try {
-        const user = await api('/api/auth/me')
+        const user = await api('/auth/me')
         setCurrentUser(user)
       } catch (error) {
-        console.log('Using mock user for development')
-        // Keep mock user for dev
+        // not logged in; handled by RequireAuth
       }
     }
     fetchCurrentUser()
   }, [])
 
   async function logout() {
-    try { await api('/api/auth/logout', { method: 'POST' }) } catch (e) {}
+    try { await api('/auth/logout', { method: 'POST' }) } catch (e) {}
     clearToken()
-    // For dev: just reload
-    window.location.reload()
+    navigate('/login', { replace: true })
   }
 
   const navItems = [
@@ -223,10 +212,11 @@ function Layout({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <Routes>
+      <Route path="/login" element={<Login />} />
       <Route path="/" element={<RequireAuth><Layout><Dashboard /></Layout></RequireAuth>} />
       <Route path="/profile" element={<RequireAuth><Layout><Profile /></Layout></RequireAuth>} />
       <Route path="/users" element={<RequireAuth><Layout><UserManagement /></Layout></RequireAuth>} />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   )
 }

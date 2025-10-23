@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../lib/api';
+import { api, getToken } from '../lib/api';
 import { 
   LineChart, 
   Line, 
@@ -252,6 +252,10 @@ export default function Dashboard() {
     highUR: performanceData.filter(p => p.ur > 65).length,
     lowUR: performanceData.filter(p => p.ur < 50).length,
   };
+  const topHighUR = performanceData
+    .filter(p => p.ur >= 65)
+    .sort((a, b) => b.ur - a.ur)
+    .slice(0, 3);
 
   // Filter and sort data for table
   let filteredData = selectedShift === 'all' 
@@ -387,6 +391,11 @@ export default function Dashboard() {
                 <div className="text-sm text-blue-700">
                   {alerts.highUR} chatters with 65%+ unlock rate
                 </div>
+                {topHighUR.length > 0 && (
+                  <div className="text-xs text-blue-700 mt-1">
+                    {topHighUR.map(p => p.chatter).join(', ')}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -619,6 +628,30 @@ export default function Dashboard() {
 
       {/* Performance Rankings Table */}
       <Card title="📊 Team Performance Rankings">
+        {/* Table Summary Metrics */}
+        {(() => {
+          const totalChatters = filteredData.length;
+          const totalHours = filteredData.reduce((sum, p) => sum + p.worked_hrs, 0);
+          const totalSales = filteredData.reduce((sum, p) => sum + p.sales, 0);
+          const overallSPH = totalHours > 0 ? totalSales / totalHours : 0;
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div className="bg-white border rounded-lg p-4">
+                <div className="text-xs text-gray-500">Total Active Chatters</div>
+                <div className="text-xl font-semibold text-gray-900">{totalChatters}</div>
+              </div>
+              <div className="bg-white border rounded-lg p-4">
+                <div className="text-xs text-gray-500">Total Hours Worked</div>
+                <div className="text-xl font-semibold text-gray-900">{totalHours.toFixed(0)}h</div>
+              </div>
+              <div className="bg-white border rounded-lg p-4">
+                <div className="text-xs text-gray-500">Overall SPH</div>
+                <div className="text-xl font-semibold text-gray-900">${overallSPH.toFixed(2)}</div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Filter Controls */}
         <div className="mb-6 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -855,45 +888,84 @@ export default function Dashboard() {
                 >
                   Download Template (CSV)
                 </button>
-                <button
-                  onClick={() => setShowImportModal(false)}
-                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded"
-                >
-                  Done
-                </button>
               </div>
-              <div className="mt-2 text-sm text-gray-500">After filling the template, use your import flow to upload and preview the data.</div>
+              {/* Upload Section */}
+              <ImportUpload onClose={() => setShowImportModal(false)} />
+              <div className="mt-2 text-sm text-gray-500">After uploading, data will be processed server-side and a summary will be shown.</div>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* Summary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card>
-          <div className="text-center">
-            <div className="text-3xl font-bold text-gray-900 mb-2">
-              {shiftData.reduce((sum, s) => sum + s.chatters, 0)}
-            </div>
-            <div className="text-sm text-gray-500">Total Active Chatters</div>
+// Import Upload Component
+function ImportUpload({ onClose }: { onClose: () => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string>('');
+
+  async function handleUpload() {
+    setError('');
+    setResult(null);
+    if (!file) {
+      setError('Please select an Excel file (.xlsx or .xls)');
+      return;
+    }
+    try {
+      setLoading(true);
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/admin/import/excel', {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+        headers: getToken() ? { 'Authorization': `Bearer ${getToken()}` } : undefined,
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || 'Import failed');
+      }
+      const data = await res.json();
+      setResult(data);
+    } catch (e: any) {
+      setError(e.message || 'Import failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="border-t pt-4">
+      <div className="space-y-3">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Upload Excel (.xlsx or .xls)</label>
+          <input
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            className="block w-full text-sm text-gray-700 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+          />
+        </div>
+        {error && <div className="text-sm text-red-600">{error}</div>}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleUpload}
+            disabled={loading || !file}
+            className="px-4 py-2 bg-green-600 text-white rounded disabled:opacity-50"
+          >
+            {loading ? 'Uploading…' : 'Upload & Import'}
+          </button>
+          <button onClick={onClose} className="px-4 py-2 bg-gray-100 text-gray-700 rounded">Done</button>
+        </div>
+        {result && (
+          <div className="mt-3 text-sm text-gray-700">
+            <div className="font-medium">Import Result</div>
+            <pre className="mt-1 bg-gray-50 p-3 rounded border text-xs overflow-auto">{JSON.stringify(result, null, 2)}</pre>
           </div>
-        </Card>
-        <Card>
-          <div className="text-center">
-            <div className="text-3xl font-bold text-gray-900 mb-2">
-              {performanceData.reduce((sum, p) => sum + p.worked_hrs, 0).toFixed(0)}h
-            </div>
-            <div className="text-sm text-gray-500">Total Hours Worked</div>
-          </div>
-        </Card>
-        <Card>
-          <div className="text-center">
-            <div className="text-3xl font-bold text-gray-900 mb-2">
-              ${(kpis.sales_amount / performanceData.reduce((sum, p) => sum + p.worked_hrs, 0)).toFixed(2)}
-            </div>
-            <div className="text-sm text-gray-500">Overall SPH</div>
-          </div>
-        </Card>
+        )}
       </div>
     </div>
   );
