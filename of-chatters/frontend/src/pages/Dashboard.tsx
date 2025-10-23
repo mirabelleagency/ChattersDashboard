@@ -196,6 +196,14 @@ export default function Dashboard() {
   const [showImportModal, setShowImportModal] = useState(false);
   const [period, setPeriod] = useState<'7' | '30' | '90'>('30');
   const [selectedShift, setSelectedShift] = useState<string>('all');
+  
+  // Table filtering states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'ranking' | 'sales' | 'sph' | 'ur'>('ranking');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [minSPH, setMinSPH] = useState<number | ''>('');
+  const [maxSPH, setMaxSPH] = useState<number | ''>('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'excellent' | 'review'>('all');
 
   // Calculate KPIs from sample data
   const kpis: KPIData = {
@@ -245,10 +253,62 @@ export default function Dashboard() {
     lowUR: performanceData.filter(p => p.ur < 50).length,
   };
 
-  // Filter by shift if needed
-  const filteredData = selectedShift === 'all' 
+  // Filter and sort data for table
+  let filteredData = selectedShift === 'all' 
     ? performanceData 
     : performanceData.filter(p => p.shift === selectedShift);
+
+  // Apply search filter
+  if (searchQuery) {
+    filteredData = filteredData.filter(p => 
+      p.chatter.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }
+
+  // Apply SPH range filter
+  if (minSPH !== '') {
+    filteredData = filteredData.filter(p => p.sph >= minSPH);
+  }
+  if (maxSPH !== '') {
+    filteredData = filteredData.filter(p => p.sph <= maxSPH);
+  }
+
+  // Apply status filter
+  if (statusFilter === 'excellent') {
+    filteredData = filteredData.filter(p => p.sph >= 100);
+  } else if (statusFilter === 'review') {
+    filteredData = filteredData.filter(p => p.sph < 40);
+  }
+
+  // Apply sorting
+  const sortedData = [...filteredData].sort((a, b) => {
+    let comparison = 0;
+    switch (sortBy) {
+      case 'sales':
+        comparison = a.sales - b.sales;
+        break;
+      case 'sph':
+        comparison = a.sph - b.sph;
+        break;
+      case 'ur':
+        comparison = a.ur - b.ur;
+        break;
+      case 'ranking':
+      default:
+        comparison = a.ranking - b.ranking;
+        break;
+    }
+    return sortDirection === 'asc' ? comparison : -comparison;
+  });
+
+  function toggleSort(column: 'ranking' | 'sales' | 'sph' | 'ur') {
+    if (sortBy === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(column);
+      setSortDirection('desc');
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -559,22 +619,144 @@ export default function Dashboard() {
 
       {/* Performance Rankings Table */}
       <Card title="📊 Team Performance Rankings">
-        <div className="mb-4 text-sm text-gray-600">
-          Showing {filteredData.length} of {performanceData.length} chatters
-          {selectedShift !== 'all' && ` • Filtered by ${selectedShift}`}
+        {/* Filter Controls */}
+        <div className="mb-6 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {/* Search Box */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Search Chatter</label>
+              <input
+                type="text"
+                placeholder="Search by name..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            {/* Min SPH */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Min SPH ($)</label>
+              <input
+                type="number"
+                placeholder="0"
+                value={minSPH}
+                onChange={(e) => setMinSPH(e.target.value === '' ? '' : Number(e.target.value))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            {/* Max SPH */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Max SPH ($)</label>
+              <input
+                type="number"
+                placeholder="∞"
+                value={maxSPH}
+                onChange={(e) => setMaxSPH(e.target.value === '' ? '' : Number(e.target.value))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            {/* Status Filter */}
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Status</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as 'all' | 'excellent' | 'review')}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="all">All Chatters</option>
+                <option value="excellent">⭐ Excellent (SPH ≥ $100)</option>
+                <option value="review">⚠️ Needs Review (SPH &lt; $40)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Filter Summary and Clear Button */}
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-gray-600">
+              Showing {filteredData.length} of {performanceData.length} chatters
+              {selectedShift !== 'all' && ` • Filtered by ${selectedShift}`}
+              {(searchQuery || minSPH || maxSPH || statusFilter !== 'all') && (
+                <span className="ml-2 text-blue-600 font-medium">
+                  • {[
+                    searchQuery && 'Search',
+                    minSPH && 'Min SPH',
+                    maxSPH && 'Max SPH',
+                    statusFilter !== 'all' && 'Status'
+                  ].filter(Boolean).join(', ')} active
+                </span>
+              )}
+            </div>
+            {(searchQuery || minSPH || maxSPH || statusFilter !== 'all') && (
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  setMinSPH('');
+                  setMaxSPH('');
+                  setStatusFilter('all');
+                }}
+                className="px-3 py-1 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Clear Filters
+              </button>
+            )}
+          </div>
         </div>
+
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Rank</th>
+                <th 
+                  onClick={() => toggleSort('ranking')}
+                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                >
+                  <div className="flex items-center gap-1">
+                    Rank
+                    {sortBy === 'ranking' && (
+                      <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Chatter</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Shift</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Sales</th>
+                <th 
+                  onClick={() => toggleSort('sales')}
+                  className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    Total Sales
+                    {sortBy === 'sales' && (
+                      <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </th>
                 <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Hours</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">SPH</th>
+                <th 
+                  onClick={() => toggleSort('sph')}
+                  className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    SPH
+                    {sortBy === 'sph' && (
+                      <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </th>
                 <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">ART</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">UR</th>
+                <th 
+                  onClick={() => toggleSort('ur')}
+                  className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                >
+                  <div className="flex items-center justify-end gap-1">
+                    UR
+                    {sortBy === 'ur' && (
+                      <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </div>
+                </th>
                 <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">GR</th>
                 <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
               </tr>
