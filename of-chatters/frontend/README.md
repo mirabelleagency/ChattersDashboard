@@ -1,4 +1,4 @@
-# of-chatters Frontend
+# Chatters Dashboard Frontend
 
 React + Vite + TypeScript + Tailwind.
 
