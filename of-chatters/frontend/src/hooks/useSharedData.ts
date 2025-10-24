@@ -111,14 +111,15 @@ export function useSharedData() {
     await api(`/admin/chatters/${chatterId}?soft=${soft ? 'true' : 'false'}`, {
       method: 'DELETE',
     })
-    setChatters(prev => prev.filter(c => c.id !== chatterId))
-    // Also remove from performance data by name (best-effort mapping)
-    setPerformanceData(prev => {
-      const removed = chatters.find(c => c.id === chatterId)
-      if (!removed) return prev
-      return prev.filter(p => p.chatter !== removed.name)
+    // Use the same snapshot to determine removed name and update both states consistently
+    setChatters(prev => {
+      const removed = prev.find(c => c.id === chatterId)
+      if (removed) {
+        setPerformanceData(prevPerf => prevPerf.filter(p => p.chatter !== removed.name))
+      }
+      return prev.filter(c => c.id !== chatterId)
     })
-  }, [chatters])
+  }, [])
 
   return {
     chatters,

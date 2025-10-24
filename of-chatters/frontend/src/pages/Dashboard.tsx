@@ -226,14 +226,15 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'excellent' | 'review'>('all');
 
   // Calculate KPIs from sample data
+  const totalRows = performanceData.length;
   const kpis: KPIData = {
     sales_amount: performanceData.reduce((sum, p) => sum + p.sales, 0),
-    sold_count: performanceData.length * 45, // Estimated
-    unlock_count: performanceData.length * 30, // Estimated
-    sph: performanceData.reduce((sum, p) => sum + p.sph, 0) / performanceData.length,
+    sold_count: totalRows * 45, // Estimated
+    unlock_count: totalRows * 30, // Estimated
+    sph: totalRows ? performanceData.reduce((sum, p) => sum + p.sph, 0) / totalRows : 0,
     avg_art: '1m 45s',
-    avg_ur: performanceData.reduce((sum, p) => sum + p.ur, 0) / performanceData.length,
-    avg_gr: performanceData.reduce((sum, p) => sum + p.gr, 0) / performanceData.length,
+    avg_ur: totalRows ? performanceData.reduce((sum, p) => sum + p.ur, 0) / totalRows : 0,
+    avg_gr: totalRows ? performanceData.reduce((sum, p) => sum + p.gr, 0) / totalRows : 0,
   };
 
   // Mock previous period data for trends (simulating -8% sales, +5% SPH, -2% UR)
@@ -267,7 +268,9 @@ export default function Dashboard() {
 
   // Identify alerts and insights
   const alerts = {
-    topPerformer: performanceData.reduce((max, p) => p.sph > max.sph ? p : max, performanceData[0]),
+    topPerformer: performanceData.length > 0
+      ? performanceData.reduce((max, p) => (p.sph > max.sph ? p : max), performanceData[0])
+      : null as null | ChatterPerformance,
     underPerformers: performanceData.filter(p => p.sph < 40).sort((a, b) => a.sph - b.sph).slice(0, 3),
     highUR: performanceData.filter(p => p.ur > 65).length,
     lowUR: performanceData.filter(p => p.ur < 50).length,
@@ -393,16 +396,18 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card title="💡 Key Insights">
           <div className="space-y-3">
-            <div className="flex items-start gap-3 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-              <div className="text-2xl">🏆</div>
-              <div className="flex-1">
-                <div className="font-semibold text-green-900 dark:text-green-100">Top Performer</div>
-                <div className="text-sm text-green-700 dark:text-green-300">
-                  <strong>{alerts.topPerformer.chatter}</strong> leads with ${alerts.topPerformer.sph.toFixed(2)} SPH 
-                  ({alerts.topPerformer.shift})
+            {alerts.topPerformer && (
+              <div className="flex items-start gap-3 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                <div className="text-2xl">🏆</div>
+                <div className="flex-1">
+                  <div className="font-semibold text-green-900 dark:text-green-100">Top Performer</div>
+                  <div className="text-sm text-green-700 dark:text-green-300">
+                    <strong>{alerts.topPerformer.chatter}</strong> leads with ${alerts.topPerformer.sph.toFixed(2)} SPH 
+                    ({alerts.topPerformer.shift})
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
             
             <div className="flex items-start gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
               <div className="text-2xl">🎯</div>
