@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter } from 'react-router-dom'
+import { HashRouter } from 'react-router-dom'
 import App from './App'
 import { ErrorBoundary } from './ErrorBoundary'
 import { ThemeProvider } from './contexts/ThemeContext'
@@ -10,7 +10,7 @@ import { SharedDataProvider } from './contexts/SharedDataContext'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter>
+  <HashRouter>
       <ErrorBoundary>
         <ThemeProvider>
           <SharedDataProvider>
@@ -18,6 +18,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           </SharedDataProvider>
         </ThemeProvider>
       </ErrorBoundary>
-    </BrowserRouter>
+  </HashRouter>
   </React.StrictMode>
 )
