@@ -21,26 +21,17 @@ function RequireAuth({ children }: { children: JSX.Element }) {
         return
       }
 
-      // Try to refresh using the cookie
+      // Try a cookie-based auth using /auth/me via api helper.
+      // The api() helper will attempt a refresh automatically on 401 and retry.
       try {
-        const response = await fetch('/auth/refresh', {
-          method: 'POST',
-          credentials: 'include'
-        })
-        if (response.ok) {
-          const data = await response.json()
-          if (data.access_token) {
-            setToken(data.access_token)
-            setIsAuthenticated(true)
-            return
-          }
-        }
-      } catch (error) {
-        // ignore
+        await api('/auth/me')
+        // If successful, api() may have also refreshed and set the token internally.
+        setIsAuthenticated(true)
+        return
+      } catch (e) {
+        // Not authenticated
+        setIsAuthenticated(false)
       }
-
-      // Not authenticated
-      setIsAuthenticated(false)
     }
 
     checkAuth()
