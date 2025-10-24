@@ -303,6 +303,16 @@ export default function Dashboard() {
           .slice(0, 3)
           .map(r => ({ chatter: r.chatter as string, sph: r.values.sph || 0 }));
         setUnderPerformers(lows);
+
+        // Average Unlock Rate across the period using reports API (by date, then average)
+        const convReport = await api<{ rows: Array<{ values: { conversion_rate: number } }> }>(`/reports/run`, {
+          method: 'POST',
+          body: JSON.stringify({ metrics: ['conversion_rate'], dimensions: ['date'], start, end }),
+        });
+        if (cancelled) return;
+        const convValues = (convReport.rows || []).map(r => r.values?.conversion_rate ?? 0);
+        const avgUR = convValues.length ? (convValues.reduce((a, b) => a + b, 0) / convValues.length) * 100 : 0;
+        setKpis(prev => ({ ...prev, avg_ur: Math.round(avgUR * 10) / 10 }));
       } catch (e) {
         // swallow errors; UI will show zeros/empty safely
       }
@@ -906,13 +916,13 @@ export default function Dashboard() {
                         }`}>
                           {perf.ranking}
                         </div>
+                        {perf.ranking === 1 && <span className="ml-2 align-middle text-lg" title="Gold">🥇</span>}
                         {perf.ranking === 2 && <span className="ml-2 align-middle text-lg" title="Silver">🥈</span>}
                         {perf.ranking === 3 && <span className="ml-2 align-middle text-lg" title="Bronze">🥉</span>}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
                           <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{perf.chatter}</div>
-                          {isTopPerformer && <span className="text-lg">🏆</span>}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
