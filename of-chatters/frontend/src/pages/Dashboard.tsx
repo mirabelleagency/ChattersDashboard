@@ -1,5 +1,6 @@
-﻿import { useEffect, useState } from 'react';
-import { api, getToken } from '../lib/api';
+﻿import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { getToken } from '../lib/api';
 import * as XLSX from 'xlsx';
 import { useSharedDataContext } from '../contexts/SharedDataContext';
 import { 
@@ -26,16 +27,6 @@ import {
 } from 'recharts';
 import { Card } from '../components';
 
-interface KPIData {
-  sales_amount: number;
-  sold_count: number;
-  unlock_count: number;
-  sph: number;
-  avg_art: string;
-  avg_ur: number;
-  avg_gr: number;
-}
-
 interface ChatterPerformance {
   chatter: string;
   sales: number;
@@ -55,6 +46,81 @@ interface ShiftData {
   chatters: number;
   sales: number;
   avg_sph: number;
+}
+
+type DateRange = {
+  start: Date;
+  end: Date;
+};
+
+function deriveDataRange(rows: ChatterPerformance[]): DateRange | null {
+  const dates: Date[] = [];
+  rows.forEach(row => {
+    const start = parseISODate(row.start_date);
+    if (start) dates.push(start);
+    const end = parseISODate(row.end_date);
+    if (end) dates.push(end);
+  });
+  if (!dates.length) {
+    return null;
+  }
+  const minDate = dates.reduce((min, current) => (current < min ? current : min));
+  const maxDate = dates.reduce((max, current) => (current > max ? current : max));
+  return {
+    start: normalizeDate(minDate),
+    end: normalizeDate(maxDate),
+  };
+}
+
+function parseISODate(value?: string | null): Date | null {
+  if (!value) return null;
+  const parts = value.split('-').map(Number);
+  if (parts.length !== 3 || parts.some(n => Number.isNaN(n))) {
+    return null;
+  }
+  const [year, month, day] = parts;
+  return new Date(year, month - 1, day);
+}
+
+function normalizeDate(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function formatDateInput(date: Date): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function parseDateInput(value: string): Date {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, (month ?? 1) - 1, day ?? 1);
+}
+
+function formatRangeLabel(range: DateRange): string {
+  const { start, end } = range;
+  const startDate = normalizeDate(start);
+  const endDate = normalizeDate(end);
+  const monthSpan = startDate.getFullYear() === endDate.getFullYear() && startDate.getMonth() === endDate.getMonth();
+  const monthLength = new Date(endDate.getFullYear(), endDate.getMonth() + 1, 0).getDate();
+
+  if (monthSpan && startDate.getDate() === 1 && endDate.getDate() === monthLength) {
+    return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(startDate);
+  }
+
+  const startFormatter = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: startDate.getFullYear() !== endDate.getFullYear() ? 'numeric' : undefined,
+  });
+  const endFormatter = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+  return `${startFormatter.format(startDate)} – ${endFormatter.format(endDate)}`;
 }
 
 interface MetricComparison {
@@ -174,14 +240,8 @@ function ExportMenu({ performanceData }: { performanceData: ChatterPerformance[]
         Export
       </button>
       {open && (
-        <div className="absolute right-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-xl z-10 py-2">
-          <button onClick={downloadTemplate} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 text-gray-700 hover:text-blue-700 flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            Download Import Template (Excel)
-          </button>
-          <button onClick={exportCurrentView} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 text-gray-700 hover:text-blue-700 flex items-center gap-2">
+        <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-10 py-2">
+          <button onClick={exportCurrentView} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-700 dark:text-gray-300 hover:text-blue-700 dark:hover:text-blue-400 flex items-center gap-2">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
@@ -211,189 +271,164 @@ function formatAsMMDDYYYY(d: string) {
 
 
 export default function Dashboard() {
-  const { performanceData, chatters, deleteChatter, setPerformanceData, loadChatters } = useSharedDataContext();
-  const [loading, setLoading] = useState(false);
+  const { performanceData, chatters, deleteChatter } = useSharedDataContext();
   const [showImportModal, setShowImportModal] = useState(false);
-  const [period, setPeriod] = useState<'7' | '30' | '90'>('30');
   const [selectedShift, setSelectedShift] = useState<string>('all');
-  const [refreshNonce, setRefreshNonce] = useState(0);
+  const navigate = useNavigate();
+  const [dateRange, setDateRange] = useState<DateRange>(() => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return { start, end };
+  });
+  const [initialRangeApplied, setInitialRangeApplied] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [pendingRange, setPendingRange] = useState(() => ({
+    start: formatDateInput(dateRange.start),
+    end: formatDateInput(dateRange.end),
+  }));
+  const dateRangeLabel = useMemo(() => formatRangeLabel(dateRange), [dateRange]);
+  const isRangeValid = useMemo(() => {
+    if (!pendingRange.start || !pendingRange.end) return false;
+    const start = parseDateInput(pendingRange.start);
+    const end = parseDateInput(pendingRange.end);
+    const startTime = start.getTime();
+    const endTime = end.getTime();
+    if (Number.isNaN(startTime) || Number.isNaN(endTime)) return false;
+    return startTime <= endTime;
+  }, [pendingRange.end, pendingRange.start]);
   
+  useEffect(() => {
+    setPendingRange({
+      start: formatDateInput(dateRange.start),
+      end: formatDateInput(dateRange.end),
+    });
+  }, [dateRange]);
+
+  useEffect(() => {
+    if (initialRangeApplied) {
+      return;
+    }
+    if (!performanceData.length) {
+      return;
+    }
+    const derived = deriveDataRange(performanceData);
+    if (!derived) {
+      setInitialRangeApplied(true);
+      return;
+    }
+    setDateRange(derived);
+    setInitialRangeApplied(true);
+  }, [performanceData, initialRangeApplied]);
+
+  const handleToggleDatePicker = () => {
+    setPendingRange({
+      start: formatDateInput(dateRange.start),
+      end: formatDateInput(dateRange.end),
+    });
+    setShowDatePicker(prev => !prev);
+  };
+
+  const handleApplyDateRange = () => {
+    if (!isRangeValid) return;
+    const start = parseDateInput(pendingRange.start);
+    const end = parseDateInput(pendingRange.end);
+    setDateRange({ start, end });
+    setShowDatePicker(false);
+  };
+
+  const handleResetToCurrentMonth = () => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    setDateRange({ start, end });
+    setShowDatePicker(false);
+  };
+
   // Table filtering states
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'ranking' | 'sales' | 'sph' | 'ur'>('ranking');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [minSPH, setMinSPH] = useState<number | ''>('');
-  const [maxSPH, setMaxSPH] = useState<number | ''>('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'excellent' | 'review'>('all');
 
-  // Backend-driven KPIs and trends
-  const [kpis, setKpis] = useState<KPIData>({ sales_amount: 0, sold_count: 0, unlock_count: 0, sph: 0, avg_art: '', avg_ur: 0, avg_gr: 0 });
-  const [trends, setTrends] = useState<{ sales: number; sph: number; ur: number; gr: number }>({ sales: 0, sph: 0, ur: 0, gr: 0 });
-  const [topPerformer, setTopPerformer] = useState<{ chatter_name: string; value: number } | null>(null);
-  const [topHighUR, setTopHighUR] = useState<Array<{ chatter_name: string; value: number }>>([]);
-  const [underPerformers, setUnderPerformers] = useState<Array<{ chatter: string; sph: number }>>([]);
-  const [periodLabel, setPeriodLabel] = useState<string>('');
-  const [usingAllTime, setUsingAllTime] = useState<boolean>(false);
+  const filteredPerformanceData = useMemo(() => {
+    const rangeStart = normalizeDate(dateRange.start).getTime();
+    const rangeEnd = normalizeDate(dateRange.end).getTime();
+    return performanceData.filter(perf => {
+      const start = parseISODate(perf.start_date) ?? parseISODate(perf.end_date);
+      const end = parseISODate(perf.end_date) ?? start;
+      if (!start && !end) return true;
+      const startTime = start ? normalizeDate(start).getTime() : undefined;
+      const endTime = end ? normalizeDate(end).getTime() : startTime;
+      if (startTime === undefined || endTime === undefined) return true;
+      return endTime >= rangeStart && startTime <= rangeEnd;
+    });
+  }, [performanceData, dateRange]);
 
-  function ymd(d: Date) {
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  }
-  function computeRange(days: number) {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - (days - 1));
-    return { start: ymd(start), end: ymd(end) };
-  }
-  function nice(d: string) {
-    const dt = new Date(d);
-    return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  }
+  const shiftData: ShiftData[] = useMemo(() => {
+    const map = new Map<string, { sales: number; chatters: number; hours: number }>();
+    filteredPerformanceData.forEach(perf => {
+      const key = perf.shift || 'Unassigned';
+      const entry = map.get(key) ?? { sales: 0, chatters: 0, hours: 0 };
+      entry.sales += perf.sales;
+      entry.chatters += 1;
+      entry.hours += perf.worked_hrs;
+      map.set(key, entry);
+    });
+    return Array.from(map.entries()).map(([shift, value]) => ({
+      shift,
+      sales: value.sales,
+      chatters: value.chatters,
+      avg_sph: value.hours > 0 ? value.sales / value.hours : 0,
+    }));
+  }, [filteredPerformanceData]);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function loadFromBackend() {
-      try {
-        const days = period === '7' ? 7 : period === '30' ? 30 : 90;
-        const { start, end } = computeRange(days);
-        const prevStartDate = new Date(start);
-        const prevEndDate = new Date(end);
-        prevStartDate.setDate(prevStartDate.getDate() - days);
-        prevEndDate.setDate(prevEndDate.getDate() - days);
-        const prev = { start: ymd(prevStartDate), end: ymd(prevEndDate) };
-        setPeriodLabel(`${nice(start)} – ${nice(end)}`);
-        setUsingAllTime(false);
-
-        // Fetch KPIs for current and previous period
-        type KPIApi = { sales_amount: number; sold_count: number; unlock_count: number; avg_sph: number };
-        const [curKpis, prevKpis]: [KPIApi, KPIApi] = await Promise.all([
-          api<KPIApi>(`/performance/kpis?start=${start}&end=${end}`),
-          api<KPIApi>(`/performance/kpis?start=${prev.start}&end=${prev.end}`),
-        ]);
-        if (cancelled) return;
-        setKpis({
-          sales_amount: curKpis.sales_amount,
-          sold_count: curKpis.sold_count,
-          unlock_count: curKpis.unlock_count,
-          sph: curKpis.avg_sph,
-          avg_art: '',
-          avg_ur: 0,
-          avg_gr: 0,
-        });
-        const pct = (cur: number, prev: number) => (prev ? Math.round(((cur - prev) / prev) * 1000) / 10 : 0);
-        setTrends({
-          sales: pct(curKpis.sales_amount, prevKpis.sales_amount),
-          sph: pct(curKpis.avg_sph, prevKpis.avg_sph),
-          ur: pct(curKpis.unlock_count, prevKpis.unlock_count),
-          gr: 0,
-        });
-
-        // Rankings
-        const [rankSph, rankConv] = await Promise.all([
-          api<any[]>(`/performance/rankings?metric=sph&start=${start}&end=${end}&limit=1`),
-          api<any[]>(`/performance/rankings?metric=conversion_rate&start=${start}&end=${end}&limit=3`),
-        ]);
-        if (cancelled) return;
-        setTopPerformer(rankSph && rankSph.length ? { chatter_name: rankSph[0].chatter_name, value: rankSph[0].value } : null);
-        setTopHighUR((rankConv || []).map(r => ({ chatter_name: r.chatter_name, value: r.value })));
-
-        // Underperformers by SPH < 40 via reports API (grouped by chatter)
-        const report = await api<{ rows: Array<{ chatter: string | null; values: { sph: number } }> }>(`/reports/run`, {
-          method: 'POST',
-          body: JSON.stringify({ metrics: ['sph'], dimensions: ['chatter'], start, end }),
-        });
-        if (cancelled) return;
-        const lows = (report.rows || [])
-          .filter(r => r.chatter && (r.values?.sph ?? 0) < 40)
-          .sort((a, b) => (a.values.sph ?? 0) - (b.values.sph ?? 0))
-          .slice(0, 3)
-          .map(r => ({ chatter: r.chatter as string, sph: r.values.sph || 0 }));
-        setUnderPerformers(lows);
-
-        // Average Unlock Rate across the period using reports API (by date, then average)
-        const convReport = await api<{ rows: Array<{ values: { conversion_rate: number } }> }>(`/reports/run`, {
-          method: 'POST',
-          body: JSON.stringify({ metrics: ['conversion_rate'], dimensions: ['date'], start, end }),
-        });
-        if (cancelled) return;
-        const convValues = (convReport.rows || []).map(r => r.values?.conversion_rate ?? 0);
-        const avgUR = convValues.length ? (convValues.reduce((a, b) => a + b, 0) / convValues.length) * 100 : 0;
-        setKpis(prev => ({ ...prev, avg_ur: Math.round(avgUR * 10) / 10 }));
-
-        // If selected period has no data (all zeros), fall back to all-time to avoid empty cards
-        const noData = !curKpis.sales_amount && !curKpis.sold_count && !curKpis.unlock_count && !curKpis.avg_sph;
-        if (noData) {
-          const allKpis = await api<KPIApi>(`/performance/kpis`);
-          if (cancelled) return;
-          setKpis(prev => ({
-            ...prev,
-            sales_amount: allKpis.sales_amount,
-            sold_count: allKpis.sold_count,
-            unlock_count: allKpis.unlock_count,
-            sph: allKpis.avg_sph,
-          }));
-          // Get all-time average unlock rate as well
-          const convAll = await api<{ rows: Array<{ values: { conversion_rate: number } }> }>(`/reports/run`, {
-            method: 'POST',
-            body: JSON.stringify({ metrics: ['conversion_rate'], dimensions: ['date'] }),
-          });
-          if (cancelled) return;
-          const convAllVals = (convAll.rows || []).map(r => r.values?.conversion_rate ?? 0);
-          const avgAllUR = convAllVals.length ? (convAllVals.reduce((a, b) => a + b, 0) / convAllVals.length) * 100 : 0;
-          setKpis(prev => ({ ...prev, avg_ur: Math.round(avgAllUR * 10) / 10 }));
-          setTrends({ sales: 0, sph: 0, ur: 0, gr: 0 });
-          setPeriodLabel('All time');
-          setUsingAllTime(true);
-        }
-      } catch (e) {
-        // swallow errors; UI will show zeros/empty safely
+  const mostProfitableShift = useMemo(() => {
+    if (!shiftData.length) return null;
+    return shiftData.reduce<ShiftData | null>((best, entry) => {
+      if (!best || entry.sales > best.sales) {
+        return entry;
       }
-    }
-    loadFromBackend();
-    return () => { cancelled = true };
-  }, [period, refreshNonce]);
+      return best;
+    }, null);
+  }, [shiftData]);
 
-  // Shift distribution not available from backend; hide dependent text/metrics for now.
-  const shiftData: ShiftData[] = [];
+  const totalChatters = filteredPerformanceData.length;
+  const totalSales = filteredPerformanceData.reduce((sum, p) => sum + p.sales, 0);
+  const totalHours = filteredPerformanceData.reduce((sum, p) => sum + p.worked_hrs, 0);
+  const avgSPH = totalHours > 0 ? totalSales / totalHours : 0;
+  const topPerformer = filteredPerformanceData.slice().sort((a, b) => b.sph - a.sph)[0];
+  const topPerformerName = topPerformer?.chatter ?? '—';
+  const topPerformerSPH = topPerformer ? topPerformer.sph.toFixed(2) : '0.00';
+  const activeChatters = filteredPerformanceData.filter(perf => {
+    const chatter = chatters.find(c => c.name === perf.chatter);
+    return chatter?.is_active;
+  }).length;
+  const avgUnlockRate = filteredPerformanceData.length
+    ? filteredPerformanceData.reduce((sum, p) => sum + p.ur, 0) / filteredPerformanceData.length
+    : 0;
+  const highPerformerCount = filteredPerformanceData.filter(p => p.sph >= 100).length;
 
-  // Top performers by SPH
-  const topPerformersBySPH = [...performanceData]
+  const topPerformersBySPH = filteredPerformanceData
+    .slice()
     .sort((a, b) => b.sph - a.sph)
     .slice(0, 10);
 
-  // Top performers by UR
-  const topPerformersByUR = [...performanceData]
+  const topPerformersByUR = filteredPerformanceData
+    .slice()
     .sort((a, b) => b.ur - a.ur)
     .slice(0, 10);
 
-  // Identify alerts and insights
-  const alerts = {
-    topPerformer,
-    underPerformers,
-    highUR: topHighUR.length,
-    lowUR: 0,
-  };
-
   // Filter and sort data for table
-  let filteredData = selectedShift === 'all' 
-    ? performanceData 
-    : performanceData.filter(p => p.shift === selectedShift);
+  let filteredData = selectedShift === 'all'
+    ? filteredPerformanceData
+    : filteredPerformanceData.filter(p => p.shift === selectedShift);
 
   // Apply search filter
   if (searchQuery) {
     filteredData = filteredData.filter(p => 
       p.chatter.toLowerCase().includes(searchQuery.toLowerCase())
     );
-  }
-
-  // Apply SPH range filter
-  if (minSPH !== '') {
-    filteredData = filteredData.filter(p => p.sph >= minSPH);
-  }
-  if (maxSPH !== '') {
-    filteredData = filteredData.filter(p => p.sph <= maxSPH);
   }
 
   // Apply status filter
@@ -435,346 +470,229 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Executive Summary Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-xl shadow-lg p-6 text-white">
-        <div className="flex items-start justify-between">
+      {/* CEO Dashboard Header */}
+      <div className="bg-gradient-to-r from-blue-500 to-indigo-600 dark:from-blue-700 dark:to-indigo-800 rounded-xl shadow-lg p-6 text-white">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
-            <h2 className="text-2xl font-bold mb-2">Executive Summary</h2>
-            <p className="text-blue-100">Period: {periodLabel || '—'} {usingAllTime ? '• showing all data (no data in selected period)' : ''} • Last updated: {new Date().toLocaleString()}</p>
+            <h2 className="text-2xl font-bold mb-2">Team Performance Dashboard — {dateRangeLabel}</h2>
+            <p className="text-blue-100 dark:text-blue-200">Real-time insights • Last updated: {new Date().toLocaleString()}</p>
           </div>
-          <div className="flex gap-2">
-            {['7', '30', '90'].map((days) => (
+          <div className="flex items-start gap-3">
+            <div className="relative">
               <button
-                key={days}
-                onClick={() => setPeriod(days as '7' | '30' | '90')}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  period === days ? 'bg-white text-blue-600' : 'bg-blue-700 text-white hover:bg-blue-600'
-                }`}
+                type="button"
+                onClick={handleToggleDatePicker}
+                className="px-4 py-2 rounded-lg font-semibold transition-all bg-white/10 hover:bg-white/20 text-white border border-white/20 flex items-center gap-2"
               >
-                {days} Days
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10m-11 8h12a2 2 0 002-2V7a2 2 0 00-2-2h-2.5a1.5 1.5 0 01-3 0H9.5a1.5 1.5 0 01-3 0H4a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                Calendar
               </button>
-            ))}
+              {showDatePicker && (
+                <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-4 space-y-4 z-20">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300">Start Date</label>
+                    <input
+                      type="date"
+                      value={pendingRange.start}
+                      onChange={(e) => setPendingRange(prev => ({ ...prev, start: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300">End Date</label>
+                    <input
+                      type="date"
+                      value={pendingRange.end}
+                      onChange={(e) => setPendingRange(prev => ({ ...prev, end: e.target.value }))}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={handleResetToCurrentMonth}
+                      className="px-3 py-1.5 text-sm rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-200 dark:hover:bg-blue-900/60"
+                    >
+                      Current Month
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowDatePicker(false)}
+                        className="px-3 py-1.5 text-sm rounded-lg text-gray-600 hover:text-gray-800 hover:bg-gray-100 dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-gray-800"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!isRangeValid}
+                        onClick={handleApplyDateRange}
+                        className={`px-3 py-1.5 text-sm rounded-lg font-semibold transition-colors ${
+                          isRangeValid
+                            ? 'bg-blue-600 text-white hover:bg-blue-700'
+                            : 'bg-gray-200 text-gray-500 cursor-not-allowed dark:bg-gray-800 dark:text-gray-500'
+                        }`}
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="px-5 py-2.5 rounded-lg font-semibold transition-all bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-600 hover:to-green-700 shadow-md hover:shadow-lg flex items-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              Import Data
+            </button>
+            <ExportMenu performanceData={filteredPerformanceData} />
           </div>
         </div>
         
-        {/* Quick Stats Row */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6">
+  {/* Quick Stats Row - Derived from filteredPerformanceData */}
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mt-6">
           <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
             <div className="text-blue-100 text-sm mb-1">Total Revenue</div>
-            <div className="text-2xl font-bold">${kpis.sales_amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
-            <div className={`text-sm mt-1 flex items-center gap-1 ${trends.sales >= 0 ? 'text-green-300' : 'text-red-300'}`}>
-              {trends.sales >= 0 ? '↑' : '↓'} {Math.abs(trends.sales)}% vs last period
-            </div>
+            <div className="text-2xl font-bold">${totalSales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            <div className="text-sm mt-1 text-blue-100">{totalChatters} chatters</div>
           </div>
           <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
             <div className="text-blue-100 text-sm mb-1">Avg SPH</div>
-            <div className="text-2xl font-bold">${kpis.sph.toFixed(2)}</div>
-            <div className={`text-sm mt-1 flex items-center gap-1 ${trends.sph >= 0 ? 'text-green-300' : 'text-red-300'}`}>
-              {trends.sph >= 0 ? '↑' : '↓'} {Math.abs(trends.sph)}% vs last period
-            </div>
+            <div className="text-2xl font-bold">${avgSPH.toFixed(2)}</div>
+            <div className="text-sm mt-1 text-blue-100">Sales per hour</div>
           </div>
           <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
-            <div className="text-blue-100 text-sm mb-1">Unlock Rate</div>
-            <div className="text-2xl font-bold">{kpis.avg_ur.toFixed(1)}%</div>
-            <div className={`text-sm mt-1 flex items-center gap-1 ${trends.ur >= 0 ? 'text-green-300' : 'text-red-300'}`}>
-              {trends.ur >= 0 ? '↑' : '↓'} {Math.abs(trends.ur)}% vs last period
-            </div>
+            <div className="text-blue-100 text-sm mb-1">Top Performer</div>
+            <div className="text-2xl font-bold">{topPerformerName}</div>
+            <div className="text-sm mt-1 text-blue-100">${topPerformerSPH} SPH</div>
           </div>
           <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
             <div className="text-blue-100 text-sm mb-1">Active Chatters</div>
-            <div className="text-2xl font-bold">{performanceData.length}</div>
-            <div className="text-sm mt-1 text-blue-100">Across {shiftData.length} shifts</div>
+            <div className="text-2xl font-bold">{activeChatters}</div>
+            <div className="text-sm mt-1 text-blue-100">of {totalChatters} in range</div>
+          </div>
+          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
+            <div className="text-blue-100 text-sm mb-1">Most Profitable Shift</div>
+            <div className="text-2xl font-bold">{mostProfitableShift?.shift || '—'}</div>
+            <div className="text-sm mt-1 text-blue-100">
+              {mostProfitableShift
+                ? `$${mostProfitableShift.sales.toLocaleString('en-US', { maximumFractionDigits: 0 })} • $${mostProfitableShift.avg_sph.toFixed(2)} SPH`
+                : 'No data in range'}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Critical Alerts & Insights */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card title="💡 Key Insights">
+      {/* Key Insights Cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card title="🏆 Top 5 Performers">
           <div className="space-y-3">
-            {alerts.topPerformer && (
-              <div className="flex items-start gap-3 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-                <div className="text-2xl">🏆</div>
-                <div className="flex-1">
-                  <div className="font-semibold text-green-900 dark:text-green-100">Top Performer</div>
-                  <div className="text-sm text-green-700 dark:text-green-300">
-                    <strong>{alerts.topPerformer.chatter_name}</strong> leads with ${alerts.topPerformer.value.toFixed(2)} SPH
+            {topPerformersBySPH.slice(0, 5).map((perf, idx) => (
+              <div key={perf.chatter} className="flex items-center justify-between p-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-900/30 rounded-lg border border-blue-100 dark:border-blue-800/50">
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-full font-bold text-white text-sm flex items-center justify-center ${
+                    idx === 0 ? 'bg-yellow-500' : idx === 1 ? 'bg-gray-400' : idx === 2 ? 'bg-orange-600' : 'bg-blue-500'
+                  }`}>
+                    {idx + 1}
+                  </div>
+                  <div>
+                    <div className="font-semibold text-gray-900 dark:text-gray-100">{perf.chatter}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{perf.shift}</div>
                   </div>
                 </div>
-              </div>
-            )}
-            
-            <div className="flex items-start gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-              <div className="text-2xl">🎯</div>
-              <div className="flex-1">
-                <div className="font-semibold text-blue-900 dark:text-blue-100">High Performers</div>
-                <div className="text-sm text-blue-700 dark:text-blue-300">
-                  {alerts.highUR} chatters with 65%+ unlock rate
+                <div className="text-right">
+                  <div className="font-bold text-blue-600 dark:text-blue-400">${perf.sph.toFixed(2)}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">${perf.sales.toLocaleString()}</div>
                 </div>
-                {topHighUR.length > 0 && (
-                  <div className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                    {topHighUR.map(p => p.chatter_name).join(', ')}
-                  </div>
-                )}
               </div>
-            </div>
+            ))}
+          </div>
+        </Card>
 
-            {alerts.underPerformers.length > 0 && (
-              <div className="flex items-start gap-3 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
-                <div className="text-2xl">⚠️</div>
-                <div className="flex-1">
-                  <div className="font-semibold text-orange-900 dark:text-orange-100">Attention Needed</div>
-                  <div className="text-sm text-orange-700 dark:text-orange-300">
-                    {alerts.underPerformers.length} chatters below $40 SPH threshold
+        <Card title="⚠️ Needs Attention">
+          <div className="space-y-3">
+            {filteredPerformanceData
+              .filter(p => p.sph < 40)
+              .sort((a, b) => a.sph - b.sph)
+              .slice(0, 5)
+              .map(perf => (
+                <div key={perf.chatter} className="flex items-center justify-between p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                  <div>
+                    <div className="font-semibold text-gray-900 dark:text-gray-100">{perf.chatter}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{perf.shift}</div>
                   </div>
-                  <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">
-                    {alerts.underPerformers.map(p => p.chatter).join(', ')}
+                  <div className="text-right">
+                    <div className="font-bold text-orange-600 dark:text-orange-400">${perf.sph.toFixed(2)}</div>
+                    <div className="text-xs text-orange-500 dark:text-orange-400">Below target</div>
                   </div>
                 </div>
+              ))}
+            {filteredPerformanceData.filter(p => p.sph < 40).length === 0 && (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                <div className="text-4xl mb-2">🎉</div>
+                <div>All chatters performing above threshold!</div>
               </div>
             )}
           </div>
         </Card>
 
-        <Card title="📊 Performance Trends">
+        <Card title="📊 Quick Stats">
           <div className="space-y-4">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Revenue Growth</span>
-                <span className={`text-lg font-bold ${trends.sales >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                  {trends.sales >= 0 ? '+' : ''}{trends.sales}%
-                </span>
-              </div>
-              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                <div 
-                  className={`h-2 rounded-full ${trends.sales >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
-                  style={{ width: `${Math.min(Math.abs(trends.sales) * 5, 100)}%` }}
-                />
-              </div>
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+              <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Total Hours Worked</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{totalHours.toFixed(0)}h</div>
             </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">SPH Improvement</span>
-                <span className={`text-lg font-bold ${trends.sph >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                  {trends.sph >= 0 ? '+' : ''}{trends.sph}%
-                </span>
+            <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+              <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">High Performers</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                {highPerformerCount}
               </div>
-              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                <div 
-                  className={`h-2 rounded-full ${trends.sph >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
-                  style={{ width: `${Math.min(Math.abs(trends.sph) * 5, 100)}%` }}
-                />
-              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">SPH ≥ $100</div>
             </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Unlock Rate Change</span>
-                <span className={`text-lg font-bold ${trends.ur >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                  {trends.ur >= 0 ? '+' : ''}{trends.ur}%
-                </span>
-              </div>
-              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                <div 
-                  className={`h-2 rounded-full ${trends.ur >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
-                  style={{ width: `${Math.min(Math.abs(trends.ur) * 10, 100)}%` }}
-                />
+            <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
+              <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Avg Unlock Rate</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                {avgUnlockRate.toFixed(1)}%
               </div>
             </div>
           </div>
         </Card>
       </div>
 
-      {/* Action Buttons */}
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2">
+      {/* Shift Filter Buttons */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setSelectedShift('all')}
+          className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+            selectedShift === 'all' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600'
+          }`}
+        >
+          All Shifts
+        </button>
+        {['Shift A', 'Shift B', 'Shift C'].map((shift) => (
           <button
-            onClick={() => setSelectedShift('all')}
+            key={shift}
+            onClick={() => setSelectedShift(shift)}
             className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-              selectedShift === 'all' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600'
+              selectedShift === shift ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600'
             }`}
           >
-            All Shifts
+            {shift}
           </button>
-          {['Shift A', 'Shift B', 'Shift C'].map((shift) => (
-            <button
-              key={shift}
-              onClick={() => setSelectedShift(shift)}
-              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                selectedShift === shift ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600'
-              }`}
-            >
-              {shift}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-3">
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="px-5 py-2.5 rounded-lg font-semibold transition-all bg-gradient-to-r from-green-500 to-green-600 text-white hover:from-green-600 hover:to-green-700 shadow-md hover:shadow-lg flex items-center gap-2"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
-            Import Data
-          </button>
-          <ExportMenu performanceData={performanceData} />
-        </div>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-6 text-white transform hover:scale-105 transition-transform">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-blue-100 text-sm font-medium">Total Sales</div>
-            <svg className="w-8 h-8 text-blue-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div className="text-3xl font-bold mb-1">${kpis.sales_amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-          <div className={`text-sm flex items-center gap-1 ${trends.sales >= 0 ? 'text-green-200' : 'text-red-200'}`}>
-            {trends.sales >= 0 ? '↑' : '↓'} {Math.abs(trends.sales)}% from last period
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg p-6 text-white transform hover:scale-105 transition-transform">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-green-100 text-sm font-medium">Avg SPH</div>
-            <svg className="w-8 h-8 text-green-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-            </svg>
-          </div>
-          <div className="text-3xl font-bold mb-1">${kpis.sph.toFixed(2)}</div>
-          <div className={`text-sm flex items-center gap-1 ${trends.sph >= 0 ? 'text-green-200' : 'text-red-200'}`}>
-            {trends.sph >= 0 ? '↑' : '↓'} {Math.abs(trends.sph)}% improvement
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg p-6 text-white transform hover:scale-105 transition-transform">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-purple-100 text-sm font-medium">Avg Unlock Rate</div>
-            <svg className="w-8 h-8 text-purple-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <div className="text-3xl font-bold mb-1">{kpis.avg_ur.toFixed(1)}%</div>
-          <div className={`text-sm flex items-center gap-1 ${trends.ur >= 0 ? 'text-green-200' : 'text-red-200'}`}>
-            {trends.ur >= 0 ? '↑' : '↓'} {Math.abs(trends.ur)}% change
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl shadow-lg p-6 text-white transform hover:scale-105 transition-transform">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-orange-100 text-sm font-medium">Avg ART</div>
-            <svg className="w-8 h-8 text-orange-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div className="text-3xl font-bold mb-1">{kpis.avg_art}</div>
-          <div className="text-orange-100 text-sm">Resolution time</div>
-        </div>
-      </div>
-
-      {/* Charts Row 1: SPH and UR Comparison */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* SPH Performance Chart */}
-        <Card title="Sales Per Hour (SPH) - Top 10">
-          <ResponsiveContainer width="100%" height={350}>
-            <BarChart data={topPerformersBySPH} layout="vertical" margin={{ left: 80 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis type="number" tick={{ fontSize: 12 }} />
-              <YAxis dataKey="chatter" type="category" tick={{ fontSize: 12 }} width={70} />
-              <Tooltip 
-                contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
-                formatter={(value: number) => [`$${value.toFixed(2)}`, 'SPH']}
-              />
-              <Bar dataKey="sph" fill="#3b82f6" radius={[0, 8, 8, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
-
-        {/* Unlock Rate Chart */}
-        <Card title="Unlock Rate (UR) - Top 10">
-          <ResponsiveContainer width="100%" height={350}>
-            <BarChart data={topPerformersByUR} layout="vertical" margin={{ left: 80 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis type="number" tick={{ fontSize: 12 }} />
-              <YAxis dataKey="chatter" type="category" tick={{ fontSize: 12 }} width={70} />
-              <Tooltip 
-                contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
-                formatter={(value: number) => [`${value.toFixed(1)}%`, 'UR']}
-              />
-              <Bar dataKey="ur" fill="#8b5cf6" radius={[0, 8, 8, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
-      </div>
-
-      {/* Charts Row 2: Shift Distribution and Performance Correlation */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Shift Distribution */}
-        <Card title="Shift Distribution & Performance">
-          <ResponsiveContainer width="100%" height={300}>
-            <ComposedChart data={shiftData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="shift" tick={{ fontSize: 12 }} />
-              <YAxis yAxisId="left" tick={{ fontSize: 12 }} />
-              <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} />
-              <Tooltip contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }} />
-              <Legend />
-              <Bar yAxisId="left" dataKey="chatters" fill="#10b981" name="Chatters" radius={[8, 8, 0, 0]} />
-              <Line yAxisId="right" type="monotone" dataKey="avg_sph" stroke="#3b82f6" strokeWidth={3} name="Avg SPH" />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </Card>
-
-        {/* SPH vs UR Scatter */}
-        <Card title="SPH vs Unlock Rate Correlation">
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={performanceData.slice(0, 8)}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="chatter" tick={{ fontSize: 10 }} height={80} interval={0} />
-              <YAxis yAxisId="left" tick={{ fontSize: 12 }} />
-              <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} />
-              <Tooltip contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }} />
-              <Legend />
-              <Bar yAxisId="left" dataKey="sph" fill="#3b82f6" name="SPH ($)" radius={[8, 8, 0, 0]} />
-              <Bar yAxisId="right" dataKey="ur" fill="#8b5cf6" name="UR (%)" radius={[8, 8, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
+        ))}
       </div>
 
       {/* Performance Rankings Table */}
   <Card title="🎯 Team Performance Rankings">
-        {/* Table Summary Metrics */}
-        {(() => {
-          const totalChatters = filteredData.length;
-          const totalHours = filteredData.reduce((sum, p) => sum + p.worked_hrs, 0);
-          const totalSales = filteredData.reduce((sum, p) => sum + p.sales, 0);
-          const overallSPH = totalHours > 0 ? totalSales / totalHours : 0;
-          return (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                <div className="text-xs text-gray-500 dark:text-gray-400">Total Active Chatters</div>
-                <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">{totalChatters}</div>
-              </div>
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                <div className="text-xs text-gray-500 dark:text-gray-400">Total Hours Worked</div>
-                <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">{totalHours.toFixed(0)}h</div>
-              </div>
-              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                <div className="text-xs text-gray-500 dark:text-gray-400">Overall SPH</div>
-                <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">${overallSPH.toFixed(2)}</div>
-              </div>
-            </div>
-          );
-        })()}
-
         {/* Filter Controls */}
         <div className="mb-6 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Search Box */}
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Search Chatter</label>
@@ -785,43 +703,6 @@ export default function Dashboard() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
-            </div>
-
-            {/* Min SPH */}
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Min SPH ($)</label>
-              <input
-                type="number"
-                placeholder="0"
-                min={0}
-                value={minSPH}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === '') return setMinSPH('');
-                  const n = Math.max(0, Number(v));
-                  setMinSPH(Number.isFinite(n) ? n : 0);
-                }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
-
-            {/* Max SPH */}
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Max SPH ($)</label>
-              <select
-                value={maxSPH === '' ? '' : String(maxSPH)}
-                onChange={(e) => setMaxSPH(e.target.value === '' ? '' : Number(e.target.value))}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="">Any</option>
-                <option value="30">&lt;30</option>
-                <option value="40">&lt;40</option>
-                <option value="50">&lt;50</option>
-                <option value="60">&lt;60</option>
-                <option value="70">&lt;70</option>
-                <option value="80">&lt;80</option>
-                <option value="90">&lt;90</option>
-              </select>
             </div>
 
             {/* Status Filter */}
@@ -840,30 +721,24 @@ export default function Dashboard() {
           </div>
 
           {/* Filter Summary and Clear Button */}
-          <div className="flex items-center justify-between">
-            <div className="text-sm text-gray-600">
-              Showing {filteredData.length} of {performanceData.length} chatters
-              {selectedShift !== 'all' && ` • Filtered by ${selectedShift}`}
-              {(searchQuery || minSPH || maxSPH || statusFilter !== 'all') && (
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between text-sm text-gray-600 dark:text-gray-400">
+            <div>
+              Showing {filteredData.length} of {filteredPerformanceData.length} chatters
+              {selectedShift !== 'all' && ` • Shift: ${selectedShift}`}
+              {(searchQuery || statusFilter !== 'all') && (
                 <span className="ml-2 text-blue-600 font-medium">
-                  • {[
-                    searchQuery && 'Search',
-                    minSPH && 'Min SPH',
-                    maxSPH && 'Max SPH',
-                    statusFilter !== 'all' && 'Status'
-                  ].filter(Boolean).join(', ')} active
+                  • {[searchQuery && 'Search', statusFilter !== 'all' && 'Status'].filter(Boolean).join(', ')} active
                 </span>
               )}
             </div>
-            {(searchQuery || minSPH || maxSPH || statusFilter !== 'all') && (
+            {(searchQuery || statusFilter !== 'all' || selectedShift !== 'all') && (
               <button
                 onClick={() => {
                   setSearchQuery('');
-                  setMinSPH('');
-                  setMaxSPH('');
                   setStatusFilter('all');
+                  setSelectedShift('all');
                 }}
-                className="px-3 py-1 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                className="self-start md:self-auto px-3 py-1 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors dark:text-gray-300 dark:hover:text-gray-100 dark:hover:bg-gray-800"
               >
                 Clear Filters
               </button>
@@ -1008,16 +883,26 @@ export default function Dashboard() {
                       <td className="px-6 py-4 whitespace-nowrap text-center">
                         <div className="flex items-center justify-center gap-2">
                           {chatter && (
-                            <button
-                              className="px-2 py-1 text-xs rounded bg-red-100 hover:bg-red-200 text-red-700"
-                              onClick={async () => {
-                                if (confirm(`Permanently delete chatter "${chatter.name}" and ALL related data (shifts, performance, rankings, offenses)? This cannot be undone.`)) {
-                                  await deleteChatter(chatter.id, { soft: false });
-                                }
-                              }}
-                            >
-                              Delete
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className="px-2 py-1 text-xs rounded bg-blue-100 hover:bg-blue-200 text-blue-700 dark:bg-blue-900/50 dark:hover:bg-blue-900 dark:text-blue-200"
+                                onClick={() => navigate(`/chatters/${chatter.id}/view`)}
+                              >
+                                View
+                              </button>
+                              <button
+                                type="button"
+                                className="px-2 py-1 text-xs rounded bg-red-100 hover:bg-red-200 text-red-700 dark:bg-red-900/50 dark:hover:bg-red-900 dark:text-red-200"
+                                onClick={async () => {
+                                  if (confirm(`Permanently delete chatter "${chatter.name}" and ALL related data (shifts, performance, rankings, offenses)? This cannot be undone.`)) {
+                                    await deleteChatter(chatter.id, { soft: false });
+                                  }
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </>
                           )}
                         </div>
                       </td>
@@ -1042,7 +927,7 @@ export default function Dashboard() {
               <p className="text-sm text-gray-600">Download the Excel template with these columns: Chatter, Start Date, End Date, Worked Hrs, SPH, ART, GR, UR, Ranking, Shift. Dates must be in mm/dd/yyyy format only.</p>
               <div className="flex gap-2">
                 <button
-                  onClick={() => downloadExcelFile('chatters_import_template.xlsx', buildTemplateWorkbook(performanceData))}
+                  onClick={() => downloadExcelFile('chatters_import_template.xlsx', buildTemplateWorkbook(filteredPerformanceData))}
                   className="px-4 py-2 bg-blue-600 text-white rounded"
                 >
                   Download Import Template (Excel)
@@ -1052,9 +937,9 @@ export default function Dashboard() {
               <ImportUpload 
                 onClose={() => setShowImportModal(false)}
                 onImported={async () => {
-                  // Refresh chatters list and backend-driven KPIs/rankings without page reload
-                  try { await loadChatters(); } catch {}
-                  setRefreshNonce(n => n + 1);
+                  // Refresh by reloading context or triggering refetch
+                  setShowImportModal(false);
+                  window.location.reload();
                 }}
               />
               <div className="mt-2 text-sm text-gray-500">After uploading, data will be processed server-side and a summary will be shown.</div>
@@ -1155,7 +1040,7 @@ function ImportUpload({ onClose, onImported }: { onClose: () => void; onImported
 
             {/* Stats grid */}
             {result.stats && (
-              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-3">
                 <div className="rounded-lg border border-gray-200 bg-white p-3 text-center dark:bg-gray-800 dark:border-gray-700">
                   <div className="text-xs text-gray-500 dark:text-gray-400">Teams Created</div>
                   <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{result.stats.teams_created ?? 0}</div>
@@ -1165,13 +1050,41 @@ function ImportUpload({ onClose, onImported }: { onClose: () => void; onImported
                   <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{result.stats.chatters_created ?? 0}</div>
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-white p-3 text-center dark:bg-gray-800 dark:border-gray-700">
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Performance Records</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Performance Records Added</div>
                   <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{result.stats.performance_records ?? 0}</div>
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-white p-3 text-center dark:bg-gray-800 dark:border-gray-700">
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Shift Records</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Shift Records Added</div>
                   <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{result.stats.shift_records ?? 0}</div>
                 </div>
+                {typeof result.stats.rows_skipped === 'number' && (
+                  <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-center text-yellow-900 dark:bg-yellow-900/20 dark:border-yellow-700 dark:text-yellow-200">
+                    <div className="text-xs">Rows Skipped</div>
+                    <div className="text-lg font-semibold">{result.stats.rows_skipped}</div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {result.stats?.rows_skipped > 0 && Array.isArray(result.stats.skipped_samples) && result.stats.skipped_samples.length > 0 && (
+              <div className="mt-4 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-900 dark:bg-yellow-900/20 dark:border-yellow-700 dark:text-yellow-100">
+                <div className="font-semibold mb-1">Duplicates ignored</div>
+                <p className="mb-2">The entries below were already in the system and were skipped during this import:</p>
+                <ul className="space-y-1">
+                  {result.stats.skipped_samples.slice(0, 10).map((dup: any, idx: number) => (
+                    <li key={`${dup.chatter}-${dup.date}-${idx}`} className="flex items-start gap-2">
+                      <span className="mt-0.5 text-xs">•</span>
+                      <span>
+                        <span className="font-medium">{dup.chatter}</span>
+                        {dup.date && <span className="ml-1">({dup.date})</span>}
+                        {dup.details && <span className="ml-1 text-xs text-yellow-800 dark:text-yellow-200/80">— {dup.details}</span>}
+                      </span>
+                    </li>
+                  ))}
+                  {result.stats.rows_skipped > result.stats.skipped_samples.length && (
+                    <li className="text-xs italic text-yellow-800 dark:text-yellow-200/80">...and {result.stats.rows_skipped - result.stats.skipped_samples.length} more.</li>
+                  )}
+                </ul>
               </div>
             )}
 

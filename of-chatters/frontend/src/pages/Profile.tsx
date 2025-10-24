@@ -28,7 +28,7 @@ export default function Profile() {
       
       // Fetch offenses
       try {
-        const offensesData = await api<any[]>(`/offenses?chatter_id=${chatterId}`);
+        const offensesData = await api<any[]>(`/admin/offenses/?chatter_id=${chatterId}`);
         setOffenses(offensesData);
       } catch {}
       

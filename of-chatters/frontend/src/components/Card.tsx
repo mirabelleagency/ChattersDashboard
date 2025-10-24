@@ -1,11 +1,14 @@
+import type { ReactNode } from 'react'
+
 interface CardProps {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
   title?: string;
-  action?: React.ReactNode;
+  action?: ReactNode;
+  contentClassName?: string;
 }
 
-export function Card({ children, className = '', title, action }: CardProps) {
+export function Card({ children, className = '', title, action, contentClassName = '' }: CardProps) {
   return (
     <div className={`bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 ${className}`}>
       {(title || action) && (
@@ -14,7 +17,7 @@ export function Card({ children, className = '', title, action }: CardProps) {
           {action && <div>{action}</div>}
         </div>
       )}
-      <div className="p-6">{children}</div>
+      <div className={`p-6 ${contentClassName}`}>{children}</div>
     </div>
   )
 }

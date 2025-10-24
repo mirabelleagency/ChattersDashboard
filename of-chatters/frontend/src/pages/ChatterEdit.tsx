@@ -25,6 +25,7 @@ export default function ChatterEdit() {
     details: '',
     sanction: ''
   })
+  const [deletingOffenseId, setDeletingOffenseId] = useState<number | null>(null)
 
   useEffect(() => { load() }, [chatterId])
 
@@ -34,7 +35,7 @@ export default function ChatterEdit() {
       const found = await api<Chatter>(`/admin/chatters/${chatterId}`)
       setModel(found)
       try {
-        const offs = await api<any[]>(`/offenses?chatter_id=${chatterId}`)
+  const offs = await api<any[]>(`/admin/offenses/?chatter_id=${chatterId}`)
         setOffenses(offs)
       } catch {}
     } catch (e: any) {
@@ -83,7 +84,7 @@ export default function ChatterEdit() {
         details: offenseForm.details || undefined,
         sanction: offenseForm.sanction || undefined,
       }
-      const created = await api<any>(`/offenses/`, { method: 'POST', body: JSON.stringify(payload) })
+  const created = await api<any>(`/admin/offenses/`, { method: 'POST', body: JSON.stringify(payload) })
       setOffenses([created, ...offenses])
       setOffenseForm({ offense_type: '', offense: '', offense_date: '', details: '', sanction: '' })
       setSuccess('Misconduct recorded')
@@ -92,6 +93,24 @@ export default function ChatterEdit() {
       setError(e.message || 'Failed to record misconduct')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function deleteOffense(offenseId: number) {
+    if (!window.confirm('Remove this misconduct record?')) {
+      return
+    }
+    try {
+      setDeletingOffenseId(offenseId)
+      setError('')
+      await api(`/admin/offenses/${offenseId}?soft=false`, { method: 'DELETE' })
+      setOffenses(prev => prev.filter(o => o.id !== offenseId))
+      setSuccess('Misconduct removed')
+      setTimeout(() => setSuccess(''), 1500)
+    } catch (e: any) {
+      setError(e.message || 'Failed to remove misconduct')
+    } finally {
+      setDeletingOffenseId(null)
     }
   }
 
@@ -292,6 +311,7 @@ export default function ChatterEdit() {
                     <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Date</th>
                     <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Details</th>
                     <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Sanction</th>
+                    <th className="px-4 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 bg-white">
@@ -302,6 +322,15 @@ export default function ChatterEdit() {
                       <td className="px-4 py-2">{o.offense_date ? new Date(o.offense_date).toLocaleDateString() : '-'}</td>
                       <td className="px-4 py-2">{o.details || '-'}</td>
                       <td className="px-4 py-2">{o.sanction || '-'}</td>
+                      <td className="px-4 py-2 text-center">
+                        <button
+                          onClick={() => deleteOffense(o.id)}
+                          disabled={deletingOffenseId === o.id}
+                          className="px-3 py-1 text-xs font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 rounded disabled:opacity-50"
+                        >
+                          {deletingOffenseId === o.id ? 'Removing…' : 'Delete'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

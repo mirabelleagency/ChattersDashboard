@@ -36,7 +36,6 @@ export default function Chatters() {
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead className="bg-gray-50 dark:bg-gray-800">
                 <tr>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Unique ID</th>
                   <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Name</th>
                   <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Handle</th>
                   <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Team</th>
@@ -49,7 +48,6 @@ export default function Chatters() {
               <tbody className="divide-y divide-gray-100 dark:divide-gray-700 bg-white dark:bg-gray-800">
                 {filtered.map(c => (
                   <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
-                    <td className="px-4 py-2 text-gray-500 dark:text-gray-400 text-sm">{c.external_id || '-'}</td>
                     <td className="px-4 py-2 text-gray-900 dark:text-gray-100">{c.name}</td>
                     <td className="px-4 py-2 text-gray-900 dark:text-gray-100">{c.handle || '-'}</td>
                     <td className="px-4 py-2 text-gray-900 dark:text-gray-100">{c.team_name || '-'}</td>

@@ -4,3 +4,77 @@
 
 html, body, #root { height: 100%; }
 body { margin: 0; }
+
+/* React Grid Layout Styles */
+.react-grid-layout {
+  position: relative;
+  transition: height 200ms ease;
+}
+
+.react-grid-item {
+  transition: all 200ms ease;
+  transition-property: left, top, width, height;
+}
+
+.react-grid-item img {
+  pointer-events: none;
+  user-select: none;
+}
+
+.react-grid-item > .react-resizable-handle {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  background: transparent !important;
+  border: none !important;
+  opacity: 0;
+}
+
+.react-grid-item > .react-resizable-handle-se { right: 4px; bottom: 4px; cursor: se-resize; }
+.react-grid-item > .react-resizable-handle-sw { left: 4px; bottom: 4px; cursor: sw-resize; }
+.react-grid-item > .react-resizable-handle-ne { right: 4px; top: 4px; cursor: ne-resize; }
+.react-grid-item > .react-resizable-handle-nw { left: 4px; top: 4px; cursor: nw-resize; }
+.react-grid-item > .react-resizable-handle-e {
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 48%;
+  cursor: e-resize;
+}
+.react-grid-item > .react-resizable-handle-w {
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 48%;
+  cursor: w-resize;
+}
+
+.react-grid-item > .react-resizable-handle::after {
+  content: none;
+}
+
+.react-resizable-hide > .react-resizable-handle {
+  display: none;
+}
+
+.react-grid-item.react-grid-placeholder {
+  background: rgb(59, 130, 246);
+  opacity: 0.2;
+  transition-duration: 100ms;
+  z-index: 2;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  -o-user-select: none;
+  user-select: none;
+  border-radius: 0.5rem;
+}
+
+.react-grid-item.react-dragging {
+  transition: none;
+  z-index: 100;
+  will-change: transform;
+}
+

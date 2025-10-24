@@ -1,15 +1,16 @@
 import { Routes, Route, Navigate, useLocation, Link, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactElement, type ReactNode } from 'react'
 import Dashboard from './pages/Dashboard'
 import Profile from './pages/Profile'
 import UserManagement from './pages/UserManagement'
 import Login from './pages/Login'
-import { getToken, setToken, clearToken, api } from './lib/api'
+import { getToken, clearToken, api } from './lib/api'
 import Chatters from './pages/Chatters'
 import ChatterEdit from './pages/ChatterEdit'
+import DataManagement from './pages/DataManagement'
 import { useTheme } from './contexts/ThemeContext'
 
-function RequireAuth({ children }: { children: JSX.Element }) {
+function RequireAuth({ children }: { children: ReactElement }) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
   const location = useLocation()
 
@@ -55,7 +56,45 @@ function RequireAuth({ children }: { children: JSX.Element }) {
   return children
 }
 
-function Layout({ children }: { children: React.ReactNode }) {
+function RequireAdmin({ children }: { children: ReactElement }) {
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    async function checkAdmin() {
+      try {
+        const user = await api('/auth/me')
+        setIsAdmin(Boolean(user?.is_admin))
+      } catch (error) {
+        setIsAdmin(false)
+      }
+    }
+
+    checkAdmin()
+  }, [])
+
+  if (isAdmin === null) {
+    return (
+      <div className="flex items-center justify-center min-h-full">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
+      </div>
+    )
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="flex items-center justify-center min-h-full">
+        <div className="text-center">
+          <p className="text-lg font-semibold text-red-600">Access restricted</p>
+          <p className="text-sm text-gray-500">Administrator privileges are required to view this area.</p>
+        </div>
+      </div>
+    )
+  }
+
+  return children
+}
+
+function Layout({ children }: { children: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -80,7 +119,7 @@ function Layout({ children }: { children: React.ReactNode }) {
     navigate('/login', { replace: true })
   }
 
-  const navItems = [
+  const baseNavItems = [
     { 
       path: '/', 
       label: 'Dashboard', 
@@ -100,17 +139,30 @@ function Layout({ children }: { children: React.ReactNode }) {
         </svg>
       )
     },
-    // User Management reserved for admins
-    ...(currentUser?.is_admin ? [{ 
-      path: '/users', 
-      label: 'User Management', 
+  ]
+
+  const adminNavItems = currentUser?.is_admin ? [
+    {
+      path: '/admin/data',
+      label: 'Data Management',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      ),
+    },
+    {
+      path: '/users',
+      label: 'User Management',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
         </svg>
-      )
-    }] : []),
-  ]
+      ),
+    },
+  ] : []
+
+  const navItems = [...baseNavItems, ...adminNavItems]
 
   const getBreadcrumbs = () => {
     return [{ label: 'Chatters Dashboard', path: '/' }]
@@ -258,10 +310,11 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/" element={<RequireAuth><Layout><Dashboard /></Layout></RequireAuth>} />
-      <Route path="/users" element={<RequireAuth><Layout><UserManagement /></Layout></RequireAuth>} />
+      <Route path="/users" element={<RequireAuth><Layout><RequireAdmin><UserManagement /></RequireAdmin></Layout></RequireAuth>} />
       <Route path="/chatters" element={<RequireAuth><Layout><Chatters /></Layout></RequireAuth>} />
       <Route path="/chatters/:id/view" element={<RequireAuth><Layout><Profile /></Layout></RequireAuth>} />
       <Route path="/chatters/:id" element={<RequireAuth><Layout><ChatterEdit /></Layout></RequireAuth>} />
+      <Route path="/admin/data" element={<RequireAuth><Layout><RequireAdmin><DataManagement /></RequireAdmin></Layout></RequireAuth>} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   )

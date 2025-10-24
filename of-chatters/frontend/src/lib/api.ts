@@ -1,8 +1,16 @@
-// Switch to cookie-only flow: do not persist access token in localStorage
+const TOKEN_STORAGE_KEY = 'chatters-dashboard-access-token'
+
 let token: string | null = null
+
+if (typeof window !== 'undefined') {
+  token = window.sessionStorage.getItem(TOKEN_STORAGE_KEY)
+}
 
 export function setToken(t: string) {
   token = t
+  if (typeof window !== 'undefined') {
+    window.sessionStorage.setItem(TOKEN_STORAGE_KEY, t)
+  }
 }
 
 export function getToken(): string | null {
@@ -11,6 +19,9 @@ export function getToken(): string | null {
 
 export function clearToken() {
   token = null
+  if (typeof window !== 'undefined') {
+    window.sessionStorage.removeItem(TOKEN_STORAGE_KEY)
+  }
 }
 
 // In dev, leave VITE_API_URL undefined to use Vite's proxy (relative URLs).

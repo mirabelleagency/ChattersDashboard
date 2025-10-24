@@ -1,5 +1,6 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -11,13 +12,15 @@ router = APIRouter(prefix="/shifts", dependencies=[Depends(require_roles("manage
 
 
 def write_audit(db: Session, user_id: Optional[int], action: str, entity: str, entity_id: Optional[str], before: Optional[dict], after: Optional[dict], request: Request):
+    before_json = jsonable_encoder(before) if before is not None else None
+    after_json = jsonable_encoder(after) if after is not None else None
     log = models.AuditLog(
         user_id=user_id,
         action=action,
         entity=entity,
         entity_id=str(entity_id) if entity_id is not None else None,
-        before_json=before,
-        after_json=after,
+        before_json=before_json,
+        after_json=after_json,
         ip=request.client.host if request and request.client else None,
         user_agent=request.headers.get("user-agent") if request else None,
     )
@@ -33,7 +36,7 @@ def list_shifts(db: Session = Depends(get_db), chatter_id: Optional[int] = None)
 
 
 @router.post("/", response_model=schemas.ShiftOut)
-def create_shift(payload: schemas.ShiftCreate, db: Session = Depends(get_db), request: Request = None, user=Depends(get_current_user)):
+def create_shift(payload: schemas.ShiftCreate, request: Request, db: Session = Depends(get_db), user=Depends(get_current_user)):
     sh = models.Shift(**payload.model_dump())
     db.add(sh)
     db.flush()
@@ -43,7 +46,7 @@ def create_shift(payload: schemas.ShiftCreate, db: Session = Depends(get_db), re
 
 
 @router.put("/{shift_id}", response_model=schemas.ShiftOut)
-def update_shift(shift_id: int, payload: schemas.ShiftUpdate, db: Session = Depends(get_db), request: Request = None, user=Depends(get_current_user)):
+def update_shift(shift_id: int, payload: schemas.ShiftUpdate, request: Request, db: Session = Depends(get_db), user=Depends(get_current_user)):
     sh = db.get(models.Shift, shift_id)
     if not sh:
         raise HTTPException(status_code=404, detail="Shift not found")
@@ -58,7 +61,7 @@ def update_shift(shift_id: int, payload: schemas.ShiftUpdate, db: Session = Depe
 
 
 @router.delete("/{shift_id}")
-def delete_shift(shift_id: int, soft: bool = True, db: Session = Depends(get_db), request: Request = None, user=Depends(get_current_user)):
+def delete_shift(shift_id: int, request: Request, soft: bool = True, db: Session = Depends(get_db), user=Depends(get_current_user)):
     sh = db.get(models.Shift, shift_id)
     if not sh:
         raise HTTPException(status_code=404, detail="Shift not found")

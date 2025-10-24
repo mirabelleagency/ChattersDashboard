@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import (
@@ -89,7 +89,7 @@ class PerformanceDaily(Base):
     unlock_count: Mapped[Optional[int]] = mapped_column(Integer)
     total_sales: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
     sph: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
-    art_interval: Mapped[Optional[str]] = mapped_column(Interval)
+    art_interval: Mapped[Optional[timedelta]] = mapped_column(Interval)
     golden_ratio: Mapped[Optional[float]] = mapped_column(Numeric(10, 4))
     hinge_top_up: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
     tricks_tsf: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
@@ -197,6 +197,8 @@ class AuditLog(Base):
     after_json = Column(JSONB)
     ip: Mapped[Optional[str]] = mapped_column(String(100))
     user_agent: Mapped[Optional[str]] = mapped_column(Text)
+
+    user = relationship("User")
 
 
 class Attachment(Base):

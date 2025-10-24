@@ -89,7 +89,14 @@ def logout(response: Response = None):
 
 @router.get("/me", response_model=schemas.UserOut)
 def me(user: models.User = Depends(get_current_user)):
-    return schemas.UserOut.model_validate(user)
+    role_names = [ur.role.name for ur in user.user_roles]
+    return schemas.UserOut(
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        roles=role_names,
+        is_admin="admin" in role_names,
+    )
 
 
 @router.post("/seed-admin")
@@ -121,4 +128,6 @@ def seed_admin(db: Session = Depends(get_db)):
         db.add(models.UserRole(user_id=user.id, role_id=admin_role.id))
 
     db.commit()
-    return {"status": "ok", "admin_email": admin_email, "password": "changeme"}
+    db.refresh(user)
+    user_roles = [ur.role.name for ur in user.user_roles]
+    return {"status": "ok", "admin_email": admin_email, "password": "changeme", "roles": user_roles}

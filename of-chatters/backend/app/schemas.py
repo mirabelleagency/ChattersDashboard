@@ -18,6 +18,43 @@ class UserOut(BaseModel):
     id: int
     email: EmailStr
     full_name: Optional[str]
+    roles: List[str] = Field(default_factory=list)
+    is_admin: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class AdminUserBase(BaseModel):
+    username: str = Field(..., min_length=3, max_length=255)
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = None
+    is_admin: bool = False
+
+
+class AdminUserCreate(AdminUserBase):
+    password: str = Field(..., min_length=6)
+
+
+class AdminUserUpdate(BaseModel):
+    username: Optional[str] = Field(None, min_length=3, max_length=255)
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = None
+    is_admin: Optional[bool] = None
+    password: Optional[str] = Field(None, min_length=6)
+
+
+class AdminPasswordReset(BaseModel):
+    new_password: str = Field(..., min_length=6)
+
+
+class AdminUserOut(BaseModel):
+    id: int
+    username: str
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = None
+    is_admin: bool
+    created_at: datetime
 
     class Config:
         from_attributes = True
@@ -230,6 +267,23 @@ class SavedReportOut(BaseModel):
     description: Optional[str]
     config_json: Dict[str, Any]
     is_public: bool
+
+    class Config:
+        from_attributes = True
+
+
+class AuditLogOut(BaseModel):
+    id: int
+    occurred_at: datetime
+    user_id: Optional[int]
+    user_email: Optional[str] = None
+    action: str
+    entity: str
+    entity_id: Optional[str]
+    before_json: Optional[Dict[str, Any]] = None
+    after_json: Optional[Dict[str, Any]] = None
+    ip: Optional[str] = None
+    user_agent: Optional[str] = None
 
     class Config:
         from_attributes = True
