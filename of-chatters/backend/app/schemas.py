@@ -31,6 +31,7 @@ class ChatterBase(BaseModel):
     phone: Optional[str] = None
     team_name: Optional[str] = None
     is_active: Optional[bool] = True
+    external_id: Optional[str] = None
 
 
 class ChatterCreate(ChatterBase):
@@ -44,6 +45,7 @@ class ChatterUpdate(BaseModel):
     phone: Optional[str] = None
     team_name: Optional[str] = None
     is_active: Optional[bool] = None
+    external_id: Optional[str] = None
 
 
 class ChatterOut(BaseModel):
@@ -54,6 +56,7 @@ class ChatterOut(BaseModel):
     phone: Optional[str]
     team_name: Optional[str]
     is_active: bool
+    external_id: Optional[str] = None
 
     class Config:
         from_attributes = True

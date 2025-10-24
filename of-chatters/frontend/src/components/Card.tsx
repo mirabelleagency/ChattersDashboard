@@ -7,10 +7,10 @@ interface CardProps {
 
 export function Card({ children, className = '', title, action }: CardProps) {
   return (
-    <div className={`bg-white rounded-lg shadow ${className}`}>
+    <div className={`bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/50 ${className}`}>
       {(title || action) && (
-        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-          {title && <h2 className="text-lg font-semibold text-gray-900">{title}</h2>}
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          {title && <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h2>}
           {action && <div>{action}</div>}
         </div>
       )}

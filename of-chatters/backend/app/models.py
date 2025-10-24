@@ -49,13 +49,14 @@ class Chatter(Base):
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     team = relationship("Team", back_populates="chatters")
-    shifts = relationship("Shift", back_populates="chatter")
+    # Use passive_deletes so SQLAlchemy doesn't try to NULL the FK on child rows; let DB ON DELETE CASCADE handle it
+    shifts = relationship("Shift", back_populates="chatter", passive_deletes=True)
 
 
 class Shift(Base):
     __tablename__ = "shifts"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    chatter_id: Mapped[int] = mapped_column(ForeignKey("chatters.id"), nullable=False)
+    chatter_id: Mapped[int] = mapped_column(ForeignKey("chatters.id", ondelete="CASCADE"), nullable=False)
     team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"))
     shift_date: Mapped[datetime] = mapped_column(Date, nullable=False)
     shift_day: Mapped[Optional[str]] = mapped_column(String(20))
@@ -79,7 +80,7 @@ class Shift(Base):
 class PerformanceDaily(Base):
     __tablename__ = "performance_daily"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    chatter_id: Mapped[int] = mapped_column(ForeignKey("chatters.id"), nullable=False)
+    chatter_id: Mapped[int] = mapped_column(ForeignKey("chatters.id", ondelete="CASCADE"), nullable=False)
     team_id: Mapped[Optional[int]] = mapped_column(ForeignKey("teams.id"))
     shift_date: Mapped[datetime] = mapped_column(Date, nullable=False)
     sales_amount: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
@@ -111,7 +112,7 @@ class PerformanceDaily(Base):
 class Offense(Base):
     __tablename__ = "offenses"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    chatter_id: Mapped[int] = mapped_column(ForeignKey("chatters.id"), nullable=False)
+    chatter_id: Mapped[int] = mapped_column(ForeignKey("chatters.id", ondelete="CASCADE"), nullable=False)
     offense_type: Mapped[Optional[str]] = mapped_column(String(100))
     offense: Mapped[Optional[str]] = mapped_column(Text)
     offense_date: Mapped[Optional[datetime]] = mapped_column(Date)
@@ -127,7 +128,7 @@ class RankingDaily(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     shift_date: Mapped[datetime] = mapped_column(Date, nullable=False)
     metric: Mapped[str] = mapped_column(String(50), nullable=False)
-    chatter_id: Mapped[int] = mapped_column(ForeignKey("chatters.id"), nullable=False)
+    chatter_id: Mapped[int] = mapped_column(ForeignKey("chatters.id", ondelete="CASCADE"), nullable=False)
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
     metric_value: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

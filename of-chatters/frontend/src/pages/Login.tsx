@@ -87,7 +87,7 @@ export default function Login() {
             {loading ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
-        <div className="mt-4 text-xs text-gray-500">Use the seeded admin: admin@example.com / changeme (dev)</div>
+  <div className="mt-4 text-xs text-gray-500">Use the seeded admin: admin@example.com / changeme (dev)</div>
       </div>
     </div>
   )

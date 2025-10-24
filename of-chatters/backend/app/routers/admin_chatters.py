@@ -10,7 +10,7 @@ from ..security.auth import require_roles, get_current_user
 router = APIRouter(dependencies=[Depends(require_roles("manager", "admin", "analyst"))])
 
 
-def write_audit(db: Session, user_id: Optional[int], action: str, entity: str, entity_id: Optional[str], before: Optional[dict], after: Optional[dict], request: Request):
+def write_audit(db: Session, user_id: Optional[int], action: str, entity: str, entity_id: Optional[str], before: Optional[dict], after: Optional[dict], request: Optional[Request]):
     log = models.AuditLog(
         user_id=user_id,
         action=action,
@@ -32,6 +32,7 @@ def list_chatters(db: Session = Depends(get_db)):
         result.append(
             schemas.ChatterOut(
                 id=ch.id,
+                external_id=ch.external_id,
                 name=ch.name,
                 handle=ch.handle,
                 email=ch.email,
@@ -43,8 +44,26 @@ def list_chatters(db: Session = Depends(get_db)):
     return result
 
 
+@router.get("/chatters/{chatter_id}", response_model=schemas.ChatterOut)
+def get_chatter(chatter_id: int, db: Session = Depends(get_db)):
+    ch = db.get(models.Chatter, chatter_id)
+    if not ch:
+        raise HTTPException(status_code=404, detail="Chatter not found")
+    team_name = db.query(models.Team.name).filter(models.Team.id == ch.team_id).scalar() if ch.team_id else None
+    return schemas.ChatterOut(
+        id=ch.id,
+        external_id=ch.external_id,
+        name=ch.name,
+        handle=ch.handle,
+        email=ch.email,
+        phone=ch.phone,
+        team_name=team_name,
+        is_active=ch.is_active,
+    )
+
+
 @router.post("/chatters", response_model=schemas.ChatterOut)
-def create_chatter(payload: schemas.ChatterCreate, db: Session = Depends(get_db), request: Request = None, user=Depends(get_current_user)):
+def create_chatter(payload: schemas.ChatterCreate, request: Request, db: Session = Depends(get_db), user=Depends(get_current_user)):
     team = None
     if payload.team_name:
         team = db.query(models.Team).filter(models.Team.name == payload.team_name).first()
@@ -59,6 +78,7 @@ def create_chatter(payload: schemas.ChatterCreate, db: Session = Depends(get_db)
         phone=payload.phone,
         is_active=True if payload.is_active is None else payload.is_active,
         team_id=team.id if team else None,
+        external_id=payload.external_id,
     )
     db.add(ch)
     db.flush()
@@ -72,6 +92,7 @@ def create_chatter(payload: schemas.ChatterCreate, db: Session = Depends(get_db)
 
     return schemas.ChatterOut(
         id=ch.id,
+        external_id=ch.external_id,
         name=ch.name,
         handle=ch.handle,
         email=ch.email,
@@ -82,7 +103,7 @@ def create_chatter(payload: schemas.ChatterCreate, db: Session = Depends(get_db)
 
 
 @router.put("/chatters/{chatter_id}", response_model=schemas.ChatterOut)
-def update_chatter(chatter_id: int, payload: schemas.ChatterUpdate, db: Session = Depends(get_db), request: Request = None, user=Depends(get_current_user)):
+def update_chatter(chatter_id: int, payload: schemas.ChatterUpdate, request: Request, db: Session = Depends(get_db), user=Depends(get_current_user)):
     ch = db.get(models.Chatter, chatter_id)
     if not ch:
         raise HTTPException(status_code=404, detail="Chatter not found")
@@ -110,6 +131,8 @@ def update_chatter(chatter_id: int, payload: schemas.ChatterUpdate, db: Session 
         ch.phone = payload.phone
     if payload.is_active is not None:
         ch.is_active = payload.is_active
+    if payload.external_id is not None:
+        ch.external_id = payload.external_id
 
     db.flush()
     after = {"id": ch.id, "name": ch.name, "team_id": ch.team_id, "is_active": ch.is_active}
@@ -119,6 +142,7 @@ def update_chatter(chatter_id: int, payload: schemas.ChatterUpdate, db: Session 
     team_name = db.query(models.Team.name).filter(models.Team.id == ch.team_id).scalar() if ch.team_id else None
     return schemas.ChatterOut(
         id=ch.id,
+        external_id=ch.external_id,
         name=ch.name,
         handle=ch.handle,
         email=ch.email,
@@ -129,7 +153,7 @@ def update_chatter(chatter_id: int, payload: schemas.ChatterUpdate, db: Session 
 
 
 @router.delete("/chatters/{chatter_id}")
-def delete_chatter(chatter_id: int, soft: bool = True, db: Session = Depends(get_db), request: Request = None, user=Depends(get_current_user)):
+def delete_chatter(chatter_id: int, request: Request, soft: bool = True, db: Session = Depends(get_db), user=Depends(get_current_user)):
     ch = db.get(models.Chatter, chatter_id)
     if not ch:
         raise HTTPException(status_code=404, detail="Chatter not found")

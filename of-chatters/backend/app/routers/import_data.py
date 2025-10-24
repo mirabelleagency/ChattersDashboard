@@ -20,18 +20,19 @@ def import_excel_file(
     Returns summary of import: teams/chatters/records created/updated.
     """
     # Validate file type
-    if not file.filename or not file.filename.endswith(('.xlsx', '.xls')):
-        raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are supported")
+    if not file.filename or not file.filename.lower().endswith(('.xlsx', '.xls', '.csv')):
+        raise HTTPException(status_code=400, detail="Only Excel or CSV files (.xlsx, .xls, .csv) are supported")
 
     # Save uploaded file to temp location
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+        ext = os.path.splitext(file.filename or '')[1] or '.xlsx'
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
             content = file.file.read()
             tmp.write(content)
             tmp_path = tmp.name
 
-        # Import using existing logic (we'll adapt import_excel.main to return stats)
+        # Import using extended logic that supports both Excel and CSV
         from ..import_excel import import_from_file
         stats = import_from_file(db, tmp_path)
 

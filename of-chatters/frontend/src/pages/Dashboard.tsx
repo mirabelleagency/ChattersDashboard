@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
-import { api, getToken } from '../lib/api';
+﻿import { useEffect, useState } from 'react';
+import { getToken } from '../lib/api';
+import * as XLSX from 'xlsx';
+import { useSharedDataContext } from '../contexts/SharedDataContext';
 import { 
   LineChart, 
   Line, 
@@ -68,28 +70,50 @@ const SHIFT_COLORS: Record<string, string> = {
   'Shift C': '#f59e0b',
 };
 
-// CSV helpers
-function buildTemplateCSV(rows: ChatterPerformance[]) {
-  const headers = ['chatter', 'total_sales', 'worked_hrs', 'start_date', 'end_date', 'sph', 'art', 'gr', 'ur', 'ranking', 'shift'];
-  const lines = [headers.join(',')];
-  // include a few sample rows
-  rows.slice(0, 8).forEach(r => {
-    const cols = [
-      `"${r.chatter}"`,
-      r.sales.toString(),
-      r.worked_hrs.toString(),
-      r.start_date || '',
-      r.end_date || '',
-      r.sph.toString(),
-      `"${r.art}"`,
-      r.gr.toString(),
-      r.ur.toString(),
-      r.ranking.toString(),
-      `"${r.shift}"`,
-    ];
-    lines.push(cols.join(','));
-  });
-  return lines.join('\n');
+// Excel template (10 columns) helpers
+function buildTemplateWorkbook(rows: ChatterPerformance[]) {
+  // Required headers per spec
+  const headers = [
+    'Chatter',
+    'Start Date',
+    'End Date',
+    'Worked Hrs',
+    'SPH',
+    'ART',
+    'GR',
+    'UR',
+    'Ranking',
+    'Shift',
+  ];
+  // Seed example rows (limit to a few)
+  const sample = rows.slice(0, 8).map(r => ({
+    'Chatter': r.chatter,
+    'Start Date': r.start_date ? formatAsMMDDYYYY(r.start_date) : '10/01/2023',
+    'End Date': r.end_date ? formatAsMMDDYYYY(r.end_date) : '10/15/2023',
+    'Worked Hrs': r.worked_hrs,
+    'SPH': r.sph,
+    'ART': r.art,
+    'GR': r.gr,
+    'UR': r.ur,
+    'Ranking': r.ranking,
+    'Shift': r.shift,
+  }));
+
+  const ws = XLSX.utils.json_to_sheet(sample, { header: headers });
+  // Prepend an instruction row
+  const info = [
+    ['Note: Dates must be mm/dd/yyyy only. Sales will be computed as Worked Hrs * SPH.'],
+  ];
+  const infoSheet = XLSX.utils.aoa_to_sheet(info);
+  // Merge info and data by creating a new sheet range
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, infoSheet, 'Info');
+  XLSX.utils.book_append_sheet(wb, ws, 'Import');
+  return wb;
+}
+
+function downloadExcelFile(filename: string, wb: XLSX.WorkBook) {
+  XLSX.writeFile(wb, filename);
 }
 
 function downloadCSVFile(filename: string, csv: string) {
@@ -109,8 +133,8 @@ function ExportMenu({ performanceData }: { performanceData: ChatterPerformance[]
   const [open, setOpen] = useState(false);
 
   function downloadTemplate() {
-    const csv = buildTemplateCSV(performanceData);
-    downloadCSVFile('chatters_import_template.csv', csv);
+    const wb = buildTemplateWorkbook(performanceData);
+    downloadExcelFile('chatters_import_template.xlsx', wb);
     setOpen(false);
   }
 
@@ -155,7 +179,7 @@ function ExportMenu({ performanceData }: { performanceData: ChatterPerformance[]
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            Download Import Template (CSV)
+            Download Import Template (Excel)
           </button>
           <button onClick={exportCurrentView} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 text-gray-700 hover:text-blue-700 flex items-center gap-2">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -169,29 +193,25 @@ function ExportMenu({ performanceData }: { performanceData: ChatterPerformance[]
   );
 }
 
-// Sample data from the provided table
-const SAMPLE_DATA: ChatterPerformance[] = [
-  { chatter: 'Lowie', sales: 14157.67, worked_hrs: 96, start_date: '2023-10-01', end_date: '2023-10-15', sph: 147.48, art: '51s', gr: 3.65, ur: 68.71, ranking: 1, shift: 'Shift A' },
-  { chatter: 'Jerald', sales: 7388.00, worked_hrs: 75, start_date: '2023-10-01', end_date: '2023-10-15', sph: 98.51, art: '2m 5s', gr: 8.34, ur: 58.70, ranking: 2, shift: 'Shift C' },
-  { chatter: 'RM', sales: 5760.00, worked_hrs: 72, start_date: '2023-10-01', end_date: '2023-10-15', sph: 80.00, art: '2m 8s', gr: 5.19, ur: 70.59, ranking: 3, shift: 'Shift B' },
-  { chatter: 'Laurence', sales: 9258.39, worked_hrs: 120.5, start_date: '2023-10-01', end_date: '2023-10-15', sph: 76.83, art: '1m 59s', gr: 7.55, ur: 50.22, ranking: 4, shift: 'Shift C' },
-  { chatter: 'Emman', sales: 4992.00, worked_hrs: 66, start_date: '2023-10-01', end_date: '2023-10-15', sph: 75.64, art: '1m 54s', gr: 5.96, ur: 59.29, ranking: 5, shift: 'Shift C' },
-  { chatter: 'JC', sales: 7248.00, worked_hrs: 97.5, start_date: '2023-10-01', end_date: '2023-10-15', sph: 74.34, art: '2m 7s', gr: 5.02, ur: 41.67, ranking: 6, shift: 'Shift C' },
-  { chatter: 'Marlon', sales: 4627.95, worked_hrs: 70, start_date: '2023-10-01', end_date: '2023-10-15', sph: 66.11, art: '1m 57s', gr: 2.22, ur: 56.25, ranking: 8, shift: 'Shift B' },
-  { chatter: 'Jerome', sales: 3644.00, worked_hrs: 55.5, start_date: '2023-10-01', end_date: '2023-10-15', sph: 65.66, art: '1m 32s', gr: 3.24, ur: 65.38, ranking: 7, shift: 'Shift C' },
-  { chatter: 'Jepp', sales: 6011.23, worked_hrs: 97, start_date: '2023-10-01', end_date: '2023-10-15', sph: 61.97, art: '1m 19s', gr: 4.24, ur: 53.45, ranking: 9, shift: 'Shift C' },
-  { chatter: 'Baste', sales: 6492.00, worked_hrs: 112, start_date: '2023-10-01', end_date: '2023-10-15', sph: 57.96, art: '1m 38s', gr: 2.58, ur: 54.46, ranking: 10, shift: 'Shift B' },
-  { chatter: 'Salman', sales: 4355.49, worked_hrs: 77, start_date: '2023-10-01', end_date: '2023-10-15', sph: 56.56, art: '1m 11s', gr: 2.23, ur: 60.00, ranking: 11, shift: 'Shift A' },
-  { chatter: 'Tomm', sales: 2540.00, worked_hrs: 65, start_date: '2023-10-01', end_date: '2023-10-15', sph: 39.08, art: '1m 21s', gr: 2.95, ur: 49.12, ranking: 12, shift: 'Shift B' },
-  { chatter: 'Rowie', sales: 2425.60, worked_hrs: 64, start_date: '2023-10-01', end_date: '2023-10-15', sph: 37.90, art: '1m 58s', gr: 4.96, ur: 61.11, ranking: 13, shift: 'Shift B' },
-  { chatter: 'Bols', sales: 2608.00, worked_hrs: 74, start_date: '2023-10-01', end_date: '2023-10-15', sph: 35.24, art: '2m 2s', gr: 3.41, ur: 56.76, ranking: 14, shift: 'Shift A' },
-  { chatter: 'Miko', sales: 2468.80, worked_hrs: 75.5, start_date: '2023-10-01', end_date: '2023-10-15', sph: 32.70, art: '2m 49s', gr: 4.85, ur: 55.56, ranking: 15, shift: 'Shift A' },
-  { chatter: 'Rommel', sales: 2282.40, worked_hrs: 81, start_date: '2023-10-01', end_date: '2023-10-15', sph: 28.18, art: '1m 46s', gr: 4.00, ur: 63.33, ranking: 16, shift: 'Shift A' },
-];
+// Utility to format an ISO-like date string into mm/dd/yyyy for the template
+function formatAsMMDDYYYY(d: string) {
+  // Accepts 'YYYY-MM-DD' or similar; returns 'MM/DD/YYYY'
+  const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(d);
+  if (m) return `${m[2]}/${m[3]}/${m[1]}`;
+  try {
+    const dt = new Date(d);
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getDate()).padStart(2, '0');
+    const yyyy = String(dt.getFullYear());
+    return `${mm}/${dd}/${yyyy}`;
+  } catch {
+    return d;
+  }
+}
 
 
 export default function Dashboard() {
-  const [performanceData, setPerformanceData] = useState<ChatterPerformance[]>(SAMPLE_DATA);
+  const { performanceData, chatters, deleteChatter } = useSharedDataContext();
   const [loading, setLoading] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [period, setPeriod] = useState<'7' | '30' | '90'>('30');
@@ -371,28 +391,28 @@ export default function Dashboard() {
 
       {/* Critical Alerts & Insights */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card title="🎯 Key Insights">
+        <Card title="💡 Key Insights">
           <div className="space-y-3">
-            <div className="flex items-start gap-3 p-3 bg-green-50 rounded-lg border border-green-200">
-              <div className="text-2xl">⭐</div>
+            <div className="flex items-start gap-3 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+              <div className="text-2xl">🏆</div>
               <div className="flex-1">
-                <div className="font-semibold text-green-900">Top Performer</div>
-                <div className="text-sm text-green-700">
+                <div className="font-semibold text-green-900 dark:text-green-100">Top Performer</div>
+                <div className="text-sm text-green-700 dark:text-green-300">
                   <strong>{alerts.topPerformer.chatter}</strong> leads with ${alerts.topPerformer.sph.toFixed(2)} SPH 
                   ({alerts.topPerformer.shift})
                 </div>
               </div>
             </div>
             
-            <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
-              <div className="text-2xl">📊</div>
+            <div className="flex items-start gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+              <div className="text-2xl">🎯</div>
               <div className="flex-1">
-                <div className="font-semibold text-blue-900">High Performers</div>
-                <div className="text-sm text-blue-700">
+                <div className="font-semibold text-blue-900 dark:text-blue-100">High Performers</div>
+                <div className="text-sm text-blue-700 dark:text-blue-300">
                   {alerts.highUR} chatters with 65%+ unlock rate
                 </div>
                 {topHighUR.length > 0 && (
-                  <div className="text-xs text-blue-700 mt-1">
+                  <div className="text-xs text-blue-700 dark:text-blue-300 mt-1">
                     {topHighUR.map(p => p.chatter).join(', ')}
                   </div>
                 )}
@@ -400,14 +420,14 @@ export default function Dashboard() {
             </div>
 
             {alerts.underPerformers.length > 0 && (
-              <div className="flex items-start gap-3 p-3 bg-orange-50 rounded-lg border border-orange-200">
+              <div className="flex items-start gap-3 p-3 bg-orange-50 dark:bg-orange-900/20 rounded-lg border border-orange-200 dark:border-orange-800">
                 <div className="text-2xl">⚠️</div>
                 <div className="flex-1">
-                  <div className="font-semibold text-orange-900">Attention Needed</div>
-                  <div className="text-sm text-orange-700">
+                  <div className="font-semibold text-orange-900 dark:text-orange-100">Attention Needed</div>
+                  <div className="text-sm text-orange-700 dark:text-orange-300">
                     {alerts.underPerformers.length} chatters below $40 SPH threshold
                   </div>
-                  <div className="text-xs text-orange-600 mt-1">
+                  <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">
                     {alerts.underPerformers.map(p => p.chatter).join(', ')}
                   </div>
                 </div>
@@ -416,16 +436,16 @@ export default function Dashboard() {
           </div>
         </Card>
 
-        <Card title="📈 Performance Trends">
+        <Card title="📊 Performance Trends">
           <div className="space-y-4">
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700">Revenue Growth</span>
-                <span className={`text-lg font-bold ${trends.sales >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Revenue Growth</span>
+                <span className={`text-lg font-bold ${trends.sales >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                   {trends.sales >= 0 ? '+' : ''}{trends.sales}%
                 </span>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                 <div 
                   className={`h-2 rounded-full ${trends.sales >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
                   style={{ width: `${Math.min(Math.abs(trends.sales) * 5, 100)}%` }}
@@ -435,12 +455,12 @@ export default function Dashboard() {
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700">SPH Improvement</span>
-                <span className={`text-lg font-bold ${trends.sph >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">SPH Improvement</span>
+                <span className={`text-lg font-bold ${trends.sph >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                   {trends.sph >= 0 ? '+' : ''}{trends.sph}%
                 </span>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                 <div 
                   className={`h-2 rounded-full ${trends.sph >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
                   style={{ width: `${Math.min(Math.abs(trends.sph) * 5, 100)}%` }}
@@ -450,12 +470,12 @@ export default function Dashboard() {
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700">Unlock Rate Change</span>
-                <span className={`text-lg font-bold ${trends.ur >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Unlock Rate Change</span>
+                <span className={`text-lg font-bold ${trends.ur >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                   {trends.ur >= 0 ? '+' : ''}{trends.ur}%
                 </span>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                 <div 
                   className={`h-2 rounded-full ${trends.ur >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
                   style={{ width: `${Math.min(Math.abs(trends.ur) * 10, 100)}%` }}
@@ -472,7 +492,7 @@ export default function Dashboard() {
           <button
             onClick={() => setSelectedShift('all')}
             className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-              selectedShift === 'all' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50 border'
+              selectedShift === 'all' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600'
             }`}
           >
             All Shifts
@@ -482,7 +502,7 @@ export default function Dashboard() {
               key={shift}
               onClick={() => setSelectedShift(shift)}
               className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                selectedShift === shift ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50 border'
+                selectedShift === shift ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600'
               }`}
             >
               {shift}
@@ -627,7 +647,7 @@ export default function Dashboard() {
       </div>
 
       {/* Performance Rankings Table */}
-      <Card title="📊 Team Performance Rankings">
+  <Card title="🎯 Team Performance Rankings">
         {/* Table Summary Metrics */}
         {(() => {
           const totalChatters = filteredData.length;
@@ -636,17 +656,17 @@ export default function Dashboard() {
           const overallSPH = totalHours > 0 ? totalSales / totalHours : 0;
           return (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div className="bg-white border rounded-lg p-4">
-                <div className="text-xs text-gray-500">Total Active Chatters</div>
-                <div className="text-xl font-semibold text-gray-900">{totalChatters}</div>
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                <div className="text-xs text-gray-500 dark:text-gray-400">Total Active Chatters</div>
+                <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">{totalChatters}</div>
               </div>
-              <div className="bg-white border rounded-lg p-4">
-                <div className="text-xs text-gray-500">Total Hours Worked</div>
-                <div className="text-xl font-semibold text-gray-900">{totalHours.toFixed(0)}h</div>
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                <div className="text-xs text-gray-500 dark:text-gray-400">Total Hours Worked</div>
+                <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">{totalHours.toFixed(0)}h</div>
               </div>
-              <div className="bg-white border rounded-lg p-4">
-                <div className="text-xs text-gray-500">Overall SPH</div>
-                <div className="text-xl font-semibold text-gray-900">${overallSPH.toFixed(2)}</div>
+              <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                <div className="text-xs text-gray-500 dark:text-gray-400">Overall SPH</div>
+                <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">${overallSPH.toFixed(2)}</div>
               </div>
             </div>
           );
@@ -684,7 +704,7 @@ export default function Dashboard() {
               <label className="block text-xs font-medium text-gray-700 mb-1">Max SPH ($)</label>
               <input
                 type="number"
-                placeholder="∞"
+                placeholder="Ôê×"
                 value={maxSPH}
                 onChange={(e) => setMaxSPH(e.target.value === '' ? '' : Number(e.target.value))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -700,8 +720,8 @@ export default function Dashboard() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="all">All Chatters</option>
-                <option value="excellent">⭐ Excellent (SPH ≥ $100)</option>
-                <option value="review">⚠️ Needs Review (SPH &lt; $40)</option>
+                <option value="excellent">Ô¡É Excellent (SPH ÔëÑ $100)</option>
+                <option value="review">ÔÜá´©Å Needs Review (SPH &lt; $40)</option>
               </select>
             </div>
           </div>
@@ -710,10 +730,10 @@ export default function Dashboard() {
           <div className="flex items-center justify-between">
             <div className="text-sm text-gray-600">
               Showing {filteredData.length} of {performanceData.length} chatters
-              {selectedShift !== 'all' && ` • Filtered by ${selectedShift}`}
+              {selectedShift !== 'all' && ` ÔÇó Filtered by ${selectedShift}`}
               {(searchQuery || minSPH || maxSPH || statusFilter !== 'all') && (
                 <span className="ml-2 text-blue-600 font-medium">
-                  • {[
+                  ÔÇó {[
                     searchQuery && 'Search',
                     minSPH && 'Min SPH',
                     maxSPH && 'Max SPH',
@@ -739,71 +759,74 @@ export default function Dashboard() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+            <thead className="bg-gray-50 dark:bg-gray-800">
               <tr>
                 <th 
                   onClick={() => toggleSort('ranking')}
-                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
                   <div className="flex items-center gap-1">
                     Rank
                     {sortBy === 'ranking' && (
-                      <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      <span className="text-blue-600 dark:text-blue-400">{sortDirection === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </div>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Chatter</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Shift</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Chatter</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Shift</th>
                 <th 
                   onClick={() => toggleSort('sales')}
-                  className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
                   <div className="flex items-center justify-end gap-1">
                     Total Sales
                     {sortBy === 'sales' && (
-                      <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      <span className="text-blue-600 dark:text-blue-400">{sortDirection === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </div>
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Hours</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Hours</th>
                 <th 
                   onClick={() => toggleSort('sph')}
-                  className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
                   <div className="flex items-center justify-end gap-1">
                     SPH
                     {sortBy === 'sph' && (
-                      <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      <span className="text-blue-600 dark:text-blue-400">{sortDirection === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </div>
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">ART</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">ART</th>
                 <th 
                   onClick={() => toggleSort('ur')}
-                  className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
                   <div className="flex items-center justify-end gap-1">
                     UR
                     {sortBy === 'ur' && (
-                      <span className="text-blue-600">{sortDirection === 'asc' ? '↑' : '↓'}</span>
+                      <span className="text-blue-600 dark:text-blue-400">{sortDirection === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </div>
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">GR</th>
-                <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">GR</th>
+                <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
               {filteredData
                 .sort((a, b) => a.ranking - b.ranking)
                 .map((perf) => {
                   const isTopPerformer = perf.sph >= 100;
                   const needsAttention = perf.sph < 40;
+                  // Find chatter by name for actions/status
+                  const chatter = chatters.find(c => c.name === perf.chatter);
                   
                   return (
-                    <tr key={perf.chatter} className={`hover:bg-gray-50 transition-colors ${
-                      isTopPerformer ? 'bg-green-50' : needsAttention ? 'bg-orange-50' : ''
+                    <tr key={perf.chatter} className={`hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${
+                      isTopPerformer ? 'bg-green-50 dark:bg-green-900/20' : needsAttention ? 'bg-orange-50 dark:bg-orange-900/20' : ''
                     }`}>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className={`flex items-center justify-center w-8 h-8 rounded-full font-bold text-white text-sm ${
@@ -817,8 +840,8 @@ export default function Dashboard() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
-                          <div className="text-sm font-semibold text-gray-900">{perf.chatter}</div>
-                          {isTopPerformer && <span className="text-lg">⭐</span>}
+                          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{perf.chatter}</div>
+                          {isTopPerformer && <span className="text-lg">🏆</span>}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -832,35 +855,56 @@ export default function Dashboard() {
                           {perf.shift}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900 dark:text-gray-100">
                         ${perf.sales.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900 dark:text-gray-100">
                         {perf.worked_hrs}h
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-blue-600">
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-blue-600 dark:text-blue-400">
                         ${perf.sph.toFixed(2)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900 dark:text-gray-100">
                         {perf.art}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-purple-600">
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-semibold text-purple-600 dark:text-purple-400">
                         {perf.ur.toFixed(1)}%
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900 dark:text-gray-100">
                         {perf.gr.toFixed(2)}%
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
                         {isTopPerformer && (
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-200">
                             Excellent
                           </span>
                         )}
                         {needsAttention && (
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 dark:bg-orange-900/50 text-orange-800 dark:text-orange-200">
                             Review
                           </span>
                         )}
+                        {chatter && (
+                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ml-2 ${chatter.is_active ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-200' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'}`}>
+                            {chatter.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          {chatter && (
+                            <button
+                              className="px-2 py-1 text-xs rounded bg-red-100 hover:bg-red-200 text-red-700"
+                              onClick={async () => {
+                                if (confirm(`Permanently delete chatter "${chatter.name}" and ALL related data (shifts, performance, rankings, offenses)? This cannot be undone.`)) {
+                                  await deleteChatter(chatter.id, { soft: false });
+                                }
+                              }}
+                            >
+                              Delete
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -880,13 +924,13 @@ export default function Dashboard() {
               <button onClick={() => setShowImportModal(false)} className="text-gray-400 hover:text-gray-600">Close</button>
             </div>
             <div className="mt-4 space-y-4">
-              <p className="text-sm text-gray-600">You can download a CSV template pre-filled with sample rows. Required fields: chatter, total_sales (Total Sales), start_date (YYYY-MM-DD), end_date (YYYY-MM-DD), worked_hrs, sph, art, gr, ur, ranking, shift.</p>
+              <p className="text-sm text-gray-600">Download the Excel template with these columns: Chatter, Start Date, End Date, Worked Hrs, SPH, ART, GR, UR, Ranking, Shift. Dates must be in mm/dd/yyyy format only.</p>
               <div className="flex gap-2">
                 <button
-                  onClick={() => downloadCSVFile('chatters_import_template.csv', buildTemplateCSV(performanceData))}
+                  onClick={() => downloadExcelFile('chatters_import_template.xlsx', buildTemplateWorkbook(performanceData))}
                   className="px-4 py-2 bg-blue-600 text-white rounded"
                 >
-                  Download Template (CSV)
+                  Download Import Template (Excel)
                 </button>
               </div>
               {/* Upload Section */}
@@ -911,7 +955,7 @@ function ImportUpload({ onClose }: { onClose: () => void }) {
     setError('');
     setResult(null);
     if (!file) {
-      setError('Please select an Excel file (.xlsx or .xls)');
+      setError('Please select an Excel or CSV file (.xlsx, .xls, or .csv)');
       return;
     }
     try {
@@ -941,10 +985,10 @@ function ImportUpload({ onClose }: { onClose: () => void }) {
     <div className="border-t pt-4">
       <div className="space-y-3">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Upload Excel (.xlsx or .xls)</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Upload File (.xlsx, .xls, .csv)</label>
           <input
             type="file"
-            accept=".xlsx,.xls"
+            accept=".xlsx,.xls,.csv"
             onChange={(e) => setFile(e.target.files?.[0] || null)}
             className="block w-full text-sm text-gray-700 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
           />

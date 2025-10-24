@@ -83,7 +83,7 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)) -> m
     return user
 
 
-def require_roles(*roles: List[str]) -> Callable:
+def require_roles(*roles: str) -> Callable:
     def dependency(user: models.User = Depends(get_current_user)) -> models.User:
         user_role_names = {ur.role.name for ur in user.user_roles}
         # Admin override

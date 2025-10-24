@@ -7,6 +7,8 @@ from alembic import context
 
 # Import metadata from app
 from app.db import Base, DATABASE_URL
+# Import all models to ensure they're registered with Base.metadata
+from app import models
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -24,8 +24,11 @@ def write_audit(db: Session, user_id: Optional[int], action: str, entity: str, e
 
 
 @router.get("/", response_model=List[schemas.OffenseOut])
-def list_offenses(db: Session = Depends(get_db)):
-    return db.query(models.Offense).all()
+def list_offenses(chatter_id: Optional[int] = None, db: Session = Depends(get_db)):
+    q = db.query(models.Offense)
+    if chatter_id is not None:
+        q = q.filter(models.Offense.chatter_id == chatter_id)
+    return q.all()
 
 
 @router.post("/", response_model=schemas.OffenseOut)
