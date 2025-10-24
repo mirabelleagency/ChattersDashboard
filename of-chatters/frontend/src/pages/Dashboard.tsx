@@ -232,6 +232,8 @@ export default function Dashboard() {
   const [topPerformer, setTopPerformer] = useState<{ chatter_name: string; value: number } | null>(null);
   const [topHighUR, setTopHighUR] = useState<Array<{ chatter_name: string; value: number }>>([]);
   const [underPerformers, setUnderPerformers] = useState<Array<{ chatter: string; sph: number }>>([]);
+  const [periodLabel, setPeriodLabel] = useState<string>('');
+  const [usingAllTime, setUsingAllTime] = useState<boolean>(false);
 
   function ymd(d: Date) {
     const yyyy = d.getFullYear();
@@ -245,6 +247,10 @@ export default function Dashboard() {
     start.setDate(end.getDate() - (days - 1));
     return { start: ymd(start), end: ymd(end) };
   }
+  function nice(d: string) {
+    const dt = new Date(d);
+    return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -257,6 +263,8 @@ export default function Dashboard() {
         prevStartDate.setDate(prevStartDate.getDate() - days);
         prevEndDate.setDate(prevEndDate.getDate() - days);
         const prev = { start: ymd(prevStartDate), end: ymd(prevEndDate) };
+        setPeriodLabel(`${nice(start)} – ${nice(end)}`);
+        setUsingAllTime(false);
 
         // Fetch KPIs for current and previous period
         type KPIApi = { sales_amount: number; sold_count: number; unlock_count: number; avg_sph: number };
@@ -313,6 +321,32 @@ export default function Dashboard() {
         const convValues = (convReport.rows || []).map(r => r.values?.conversion_rate ?? 0);
         const avgUR = convValues.length ? (convValues.reduce((a, b) => a + b, 0) / convValues.length) * 100 : 0;
         setKpis(prev => ({ ...prev, avg_ur: Math.round(avgUR * 10) / 10 }));
+
+        // If selected period has no data (all zeros), fall back to all-time to avoid empty cards
+        const noData = !curKpis.sales_amount && !curKpis.sold_count && !curKpis.unlock_count && !curKpis.avg_sph;
+        if (noData) {
+          const allKpis = await api<KPIApi>(`/performance/kpis`);
+          if (cancelled) return;
+          setKpis(prev => ({
+            ...prev,
+            sales_amount: allKpis.sales_amount,
+            sold_count: allKpis.sold_count,
+            unlock_count: allKpis.unlock_count,
+            sph: allKpis.avg_sph,
+          }));
+          // Get all-time average unlock rate as well
+          const convAll = await api<{ rows: Array<{ values: { conversion_rate: number } }> }>(`/reports/run`, {
+            method: 'POST',
+            body: JSON.stringify({ metrics: ['conversion_rate'], dimensions: ['date'] }),
+          });
+          if (cancelled) return;
+          const convAllVals = (convAll.rows || []).map(r => r.values?.conversion_rate ?? 0);
+          const avgAllUR = convAllVals.length ? (convAllVals.reduce((a, b) => a + b, 0) / convAllVals.length) * 100 : 0;
+          setKpis(prev => ({ ...prev, avg_ur: Math.round(avgAllUR * 10) / 10 }));
+          setTrends({ sales: 0, sph: 0, ur: 0, gr: 0 });
+          setPeriodLabel('All time');
+          setUsingAllTime(true);
+        }
       } catch (e) {
         // swallow errors; UI will show zeros/empty safely
       }
@@ -406,7 +440,7 @@ export default function Dashboard() {
         <div className="flex items-start justify-between">
           <div>
             <h2 className="text-2xl font-bold mb-2">Executive Summary</h2>
-            <p className="text-blue-100">Period: Oct 1-15, 2023 • Last updated: {new Date().toLocaleString()}</p>
+            <p className="text-blue-100">Period: {periodLabel || '—'} {usingAllTime ? '• showing all data (no data in selected period)' : ''} • Last updated: {new Date().toLocaleString()}</p>
           </div>
           <div className="flex gap-2">
             {['7', '30', '90'].map((days) => (
