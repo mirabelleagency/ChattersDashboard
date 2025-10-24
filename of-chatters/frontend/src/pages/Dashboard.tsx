@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react';
-import { getToken } from '../lib/api';
+import { api, getToken } from '../lib/api';
 import * as XLSX from 'xlsx';
 import { useSharedDataContext } from '../contexts/SharedDataContext';
 import { 
@@ -72,9 +72,10 @@ const SHIFT_COLORS: Record<string, string> = {
 
 // Excel template (10 columns) helpers
 function buildTemplateWorkbook(rows: ChatterPerformance[]) {
-  // Required headers per spec
+  // Required headers per spec (updated: add Total Sales after Chatter, remove Ranking)
   const headers = [
     'Chatter',
+    'Total Sales',
     'Start Date',
     'End Date',
     'Worked Hrs',
@@ -82,12 +83,12 @@ function buildTemplateWorkbook(rows: ChatterPerformance[]) {
     'ART',
     'GR',
     'UR',
-    'Ranking',
     'Shift',
   ];
   // Seed example rows (limit to a few)
   const sample = rows.slice(0, 8).map(r => ({
     'Chatter': r.chatter,
+    'Total Sales': r.sales,
     'Start Date': r.start_date ? formatAsMMDDYYYY(r.start_date) : '10/01/2023',
     'End Date': r.end_date ? formatAsMMDDYYYY(r.end_date) : '10/15/2023',
     'Worked Hrs': r.worked_hrs,
@@ -95,14 +96,13 @@ function buildTemplateWorkbook(rows: ChatterPerformance[]) {
     'ART': r.art,
     'GR': r.gr,
     'UR': r.ur,
-    'Ranking': r.ranking,
     'Shift': r.shift,
   }));
 
   const ws = XLSX.utils.json_to_sheet(sample, { header: headers });
   // Prepend an instruction row
   const info = [
-    ['Note: Dates must be mm/dd/yyyy only. Sales will be computed as Worked Hrs * SPH.'],
+    ['Note: Dates must be mm/dd/yyyy only. Ranking is auto-calculated. Total Sales may be provided or will be computed as Worked Hrs * SPH.'],
   ];
   const infoSheet = XLSX.utils.aoa_to_sheet(info);
   // Merge info and data by creating a new sheet range
@@ -211,11 +211,12 @@ function formatAsMMDDYYYY(d: string) {
 
 
 export default function Dashboard() {
-  const { performanceData, chatters, deleteChatter } = useSharedDataContext();
+  const { performanceData, chatters, deleteChatter, setPerformanceData, loadChatters } = useSharedDataContext();
   const [loading, setLoading] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [period, setPeriod] = useState<'7' | '30' | '90'>('30');
   const [selectedShift, setSelectedShift] = useState<string>('all');
+  const [refreshNonce, setRefreshNonce] = useState(0);
   
   // Table filtering states
   const [searchQuery, setSearchQuery] = useState('');
@@ -225,36 +226,93 @@ export default function Dashboard() {
   const [maxSPH, setMaxSPH] = useState<number | ''>('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'excellent' | 'review'>('all');
 
-  // Calculate KPIs from sample data
-  const totalRows = performanceData.length;
-  const kpis: KPIData = {
-    sales_amount: performanceData.reduce((sum, p) => sum + p.sales, 0),
-    sold_count: totalRows * 45, // Estimated
-    unlock_count: totalRows * 30, // Estimated
-    sph: totalRows ? performanceData.reduce((sum, p) => sum + p.sph, 0) / totalRows : 0,
-    avg_art: '1m 45s',
-    avg_ur: totalRows ? performanceData.reduce((sum, p) => sum + p.ur, 0) / totalRows : 0,
-    avg_gr: totalRows ? performanceData.reduce((sum, p) => sum + p.gr, 0) / totalRows : 0,
-  };
+  // Backend-driven KPIs and trends
+  const [kpis, setKpis] = useState<KPIData>({ sales_amount: 0, sold_count: 0, unlock_count: 0, sph: 0, avg_art: '', avg_ur: 0, avg_gr: 0 });
+  const [trends, setTrends] = useState<{ sales: number; sph: number; ur: number; gr: number }>({ sales: 0, sph: 0, ur: 0, gr: 0 });
+  const [topPerformer, setTopPerformer] = useState<{ chatter_name: string; value: number } | null>(null);
+  const [topHighUR, setTopHighUR] = useState<Array<{ chatter_name: string; value: number }>>([]);
+  const [underPerformers, setUnderPerformers] = useState<Array<{ chatter: string; sph: number }>>([]);
 
-  // Mock previous period data for trends (simulating -8% sales, +5% SPH, -2% UR)
-  const trends = {
-    sales: 8.3,
-    sph: 12.4,
-    ur: -3.2,
-    gr: 5.7,
-  };
+  function ymd(d: Date) {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  function computeRange(days: number) {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - (days - 1));
+    return { start: ymd(start), end: ymd(end) };
+  }
 
-  // Calculate shift distribution
-  const shiftData: ShiftData[] = ['Shift A', 'Shift B', 'Shift C'].map(shift => {
-    const shiftChatters = performanceData.filter(p => p.shift === shift);
-    return {
-      shift,
-      chatters: shiftChatters.length,
-      sales: shiftChatters.reduce((sum, p) => sum + p.sales, 0),
-      avg_sph: shiftChatters.reduce((sum, p) => sum + p.sph, 0) / shiftChatters.length || 0,
-    };
-  });
+  useEffect(() => {
+    let cancelled = false;
+    async function loadFromBackend() {
+      try {
+        const days = period === '7' ? 7 : period === '30' ? 30 : 90;
+        const { start, end } = computeRange(days);
+        const prevStartDate = new Date(start);
+        const prevEndDate = new Date(end);
+        prevStartDate.setDate(prevStartDate.getDate() - days);
+        prevEndDate.setDate(prevEndDate.getDate() - days);
+        const prev = { start: ymd(prevStartDate), end: ymd(prevEndDate) };
+
+        // Fetch KPIs for current and previous period
+        type KPIApi = { sales_amount: number; sold_count: number; unlock_count: number; avg_sph: number };
+        const [curKpis, prevKpis]: [KPIApi, KPIApi] = await Promise.all([
+          api<KPIApi>(`/performance/kpis?start=${start}&end=${end}`),
+          api<KPIApi>(`/performance/kpis?start=${prev.start}&end=${prev.end}`),
+        ]);
+        if (cancelled) return;
+        setKpis({
+          sales_amount: curKpis.sales_amount,
+          sold_count: curKpis.sold_count,
+          unlock_count: curKpis.unlock_count,
+          sph: curKpis.avg_sph,
+          avg_art: '',
+          avg_ur: 0,
+          avg_gr: 0,
+        });
+        const pct = (cur: number, prev: number) => (prev ? Math.round(((cur - prev) / prev) * 1000) / 10 : 0);
+        setTrends({
+          sales: pct(curKpis.sales_amount, prevKpis.sales_amount),
+          sph: pct(curKpis.avg_sph, prevKpis.avg_sph),
+          ur: pct(curKpis.unlock_count, prevKpis.unlock_count),
+          gr: 0,
+        });
+
+        // Rankings
+        const [rankSph, rankConv] = await Promise.all([
+          api<any[]>(`/performance/rankings?metric=sph&start=${start}&end=${end}&limit=1`),
+          api<any[]>(`/performance/rankings?metric=conversion_rate&start=${start}&end=${end}&limit=3`),
+        ]);
+        if (cancelled) return;
+        setTopPerformer(rankSph && rankSph.length ? { chatter_name: rankSph[0].chatter_name, value: rankSph[0].value } : null);
+        setTopHighUR((rankConv || []).map(r => ({ chatter_name: r.chatter_name, value: r.value })));
+
+        // Underperformers by SPH < 40 via reports API (grouped by chatter)
+        const report = await api<{ rows: Array<{ chatter: string | null; values: { sph: number } }> }>(`/reports/run`, {
+          method: 'POST',
+          body: JSON.stringify({ metrics: ['sph'], dimensions: ['chatter'], start, end }),
+        });
+        if (cancelled) return;
+        const lows = (report.rows || [])
+          .filter(r => r.chatter && (r.values?.sph ?? 0) < 40)
+          .sort((a, b) => (a.values.sph ?? 0) - (b.values.sph ?? 0))
+          .slice(0, 3)
+          .map(r => ({ chatter: r.chatter as string, sph: r.values.sph || 0 }));
+        setUnderPerformers(lows);
+      } catch (e) {
+        // swallow errors; UI will show zeros/empty safely
+      }
+    }
+    loadFromBackend();
+    return () => { cancelled = true };
+  }, [period, refreshNonce]);
+
+  // Shift distribution not available from backend; hide dependent text/metrics for now.
+  const shiftData: ShiftData[] = [];
 
   // Top performers by SPH
   const topPerformersBySPH = [...performanceData]
@@ -268,17 +326,11 @@ export default function Dashboard() {
 
   // Identify alerts and insights
   const alerts = {
-    topPerformer: performanceData.length > 0
-      ? performanceData.reduce((max, p) => (p.sph > max.sph ? p : max), performanceData[0])
-      : null as null | ChatterPerformance,
-    underPerformers: performanceData.filter(p => p.sph < 40).sort((a, b) => a.sph - b.sph).slice(0, 3),
-    highUR: performanceData.filter(p => p.ur > 65).length,
-    lowUR: performanceData.filter(p => p.ur < 50).length,
+    topPerformer,
+    underPerformers,
+    highUR: topHighUR.length,
+    lowUR: 0,
   };
-  const topHighUR = performanceData
-    .filter(p => p.ur >= 65)
-    .sort((a, b) => b.ur - a.ur)
-    .slice(0, 3);
 
   // Filter and sort data for table
   let filteredData = selectedShift === 'all' 
@@ -402,8 +454,7 @@ export default function Dashboard() {
                 <div className="flex-1">
                   <div className="font-semibold text-green-900 dark:text-green-100">Top Performer</div>
                   <div className="text-sm text-green-700 dark:text-green-300">
-                    <strong>{alerts.topPerformer.chatter}</strong> leads with ${alerts.topPerformer.sph.toFixed(2)} SPH 
-                    ({alerts.topPerformer.shift})
+                    <strong>{alerts.topPerformer.chatter_name}</strong> leads with ${alerts.topPerformer.value.toFixed(2)} SPH
                   </div>
                 </div>
               </div>
@@ -418,7 +469,7 @@ export default function Dashboard() {
                 </div>
                 {topHighUR.length > 0 && (
                   <div className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                    {topHighUR.map(p => p.chatter).join(', ')}
+                    {topHighUR.map(p => p.chatter_name).join(', ')}
                   </div>
                 )}
               </div>
@@ -698,8 +749,14 @@ export default function Dashboard() {
               <input
                 type="number"
                 placeholder="0"
+                min={0}
                 value={minSPH}
-                onChange={(e) => setMinSPH(e.target.value === '' ? '' : Number(e.target.value))}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === '') return setMinSPH('');
+                  const n = Math.max(0, Number(v));
+                  setMinSPH(Number.isFinite(n) ? n : 0);
+                }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
@@ -707,13 +764,20 @@ export default function Dashboard() {
             {/* Max SPH */}
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Max SPH ($)</label>
-              <input
-                type="number"
-                placeholder="Ôê×"
-                value={maxSPH}
+              <select
+                value={maxSPH === '' ? '' : String(maxSPH)}
                 onChange={(e) => setMaxSPH(e.target.value === '' ? '' : Number(e.target.value))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
+              >
+                <option value="">Any</option>
+                <option value="30">&lt;30</option>
+                <option value="40">&lt;40</option>
+                <option value="50">&lt;50</option>
+                <option value="60">&lt;60</option>
+                <option value="70">&lt;70</option>
+                <option value="80">&lt;80</option>
+                <option value="90">&lt;90</option>
+              </select>
             </div>
 
             {/* Status Filter */}
@@ -725,8 +789,8 @@ export default function Dashboard() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="all">All Chatters</option>
-                <option value="excellent">Ô¡É Excellent (SPH ÔëÑ $100)</option>
-                <option value="review">ÔÜá´©Å Needs Review (SPH &lt; $40)</option>
+                <option value="excellent">🏆 Excellent (SPH &gt;= $100)</option>
+                <option value="review">⚠️ Needs Review (SPH &lt; $40)</option>
               </select>
             </div>
           </div>
@@ -735,10 +799,10 @@ export default function Dashboard() {
           <div className="flex items-center justify-between">
             <div className="text-sm text-gray-600">
               Showing {filteredData.length} of {performanceData.length} chatters
-              {selectedShift !== 'all' && ` ÔÇó Filtered by ${selectedShift}`}
+              {selectedShift !== 'all' && ` • Filtered by ${selectedShift}`}
               {(searchQuery || minSPH || maxSPH || statusFilter !== 'all') && (
                 <span className="ml-2 text-blue-600 font-medium">
-                  ÔÇó {[
+                  • {[
                     searchQuery && 'Search',
                     minSPH && 'Min SPH',
                     maxSPH && 'Max SPH',
@@ -834,7 +898,7 @@ export default function Dashboard() {
                       isTopPerformer ? 'bg-green-50 dark:bg-green-900/20' : needsAttention ? 'bg-orange-50 dark:bg-orange-900/20' : ''
                     }`}>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className={`flex items-center justify-center w-8 h-8 rounded-full font-bold text-white text-sm ${
+                        <div className={`inline-flex items-center justify-center w-8 h-8 rounded-full font-bold text-white text-sm ${
                           perf.ranking === 1 ? 'bg-yellow-500' : 
                           perf.ranking === 2 ? 'bg-gray-400' : 
                           perf.ranking === 3 ? 'bg-orange-600' : 
@@ -842,6 +906,8 @@ export default function Dashboard() {
                         }`}>
                           {perf.ranking}
                         </div>
+                        {perf.ranking === 2 && <span className="ml-2 align-middle text-lg" title="Silver">🥈</span>}
+                        {perf.ranking === 3 && <span className="ml-2 align-middle text-lg" title="Bronze">🥉</span>}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-2">
@@ -939,7 +1005,14 @@ export default function Dashboard() {
                 </button>
               </div>
               {/* Upload Section */}
-              <ImportUpload onClose={() => setShowImportModal(false)} />
+              <ImportUpload 
+                onClose={() => setShowImportModal(false)}
+                onImported={async () => {
+                  // Refresh chatters list and backend-driven KPIs/rankings without page reload
+                  try { await loadChatters(); } catch {}
+                  setRefreshNonce(n => n + 1);
+                }}
+              />
               <div className="mt-2 text-sm text-gray-500">After uploading, data will be processed server-side and a summary will be shown.</div>
             </div>
           </div>
@@ -950,11 +1023,12 @@ export default function Dashboard() {
 }
 
 // Import Upload Component
-function ImportUpload({ onClose }: { onClose: () => void }) {
+function ImportUpload({ onClose, onImported }: { onClose: () => void; onImported?: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
+  const [showDetails, setShowDetails] = useState(false);
 
   async function handleUpload() {
     setError('');
@@ -977,8 +1051,10 @@ function ImportUpload({ onClose }: { onClose: () => void }) {
         const text = await res.text();
         throw new Error(text || 'Import failed');
       }
-      const data = await res.json();
-      setResult(data);
+  const data = await res.json();
+  setResult(data);
+  // Notify parent to refresh live data (chatters, KPIs, rankings)
+  try { onImported && onImported(); } catch {}
     } catch (e: any) {
       setError(e.message || 'Import failed');
     } finally {
@@ -998,7 +1074,15 @@ function ImportUpload({ onClose }: { onClose: () => void }) {
             className="block w-full text-sm text-gray-700 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
           />
         </div>
-        {error && <div className="text-sm text-red-600">{error}</div>}
+        {error && (
+          <div className="flex items-start gap-2 p-3 rounded-md border border-red-200 bg-red-50 text-red-800 text-sm">
+            <span>❌</span>
+            <div>
+              <div className="font-medium">Import failed</div>
+              <div className="text-xs opacity-90">{error}</div>
+            </div>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <button
             onClick={handleUpload}
@@ -1010,9 +1094,72 @@ function ImportUpload({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="px-4 py-2 bg-gray-100 text-gray-700 rounded">Done</button>
         </div>
         {result && (
-          <div className="mt-3 text-sm text-gray-700">
-            <div className="font-medium">Import Result</div>
-            <pre className="mt-1 bg-gray-50 p-3 rounded border text-xs overflow-auto">{JSON.stringify(result, null, 2)}</pre>
+          <div className="mt-3">
+            {/* Success banner */}
+            <div className={`flex items-start gap-3 p-3 rounded-md border ${
+              result.status === 'success' ? 'border-green-200 bg-green-50 text-green-900' : 'border-yellow-200 bg-yellow-50 text-yellow-900'
+            }`}>
+              <div className="text-xl">{result.status === 'success' ? '✅' : '⚠️'}</div>
+              <div className="flex-1">
+                <div className="font-semibold">Import {result.status === 'success' ? 'completed' : 'completed with warnings'}</div>
+                <div className="text-sm opacity-90">
+                  <span className="mr-2">📄</span>
+                  <span className="font-medium">{result.filename || 'Uploaded file'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Stats grid */}
+            {result.stats && (
+              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="rounded-lg border border-gray-200 bg-white p-3 text-center dark:bg-gray-800 dark:border-gray-700">
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Teams Created</div>
+                  <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{result.stats.teams_created ?? 0}</div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-white p-3 text-center dark:bg-gray-800 dark:border-gray-700">
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Chatters Created</div>
+                  <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{result.stats.chatters_created ?? 0}</div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-white p-3 text-center dark:bg-gray-800 dark:border-gray-700">
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Performance Records</div>
+                  <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{result.stats.performance_records ?? 0}</div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-white p-3 text-center dark:bg-gray-800 dark:border-gray-700">
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Shift Records</div>
+                  <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{result.stats.shift_records ?? 0}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Optional details toggle */}
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                className="px-3 py-1.5 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-700"
+                onClick={() => setShowDetails(v => !v)}
+              >
+                {showDetails ? 'Hide details' : 'Show details'}
+              </button>
+              <button
+                className="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+                onClick={() => {
+                  setFile(null);
+                  setResult(null);
+                  setShowDetails(false);
+                }}
+              >
+                Import another file
+              </button>
+              <button
+                className="ml-auto px-3 py-1.5 text-sm rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
+                onClick={onClose}
+              >
+                Close
+              </button>
+            </div>
+
+            {showDetails && (
+              <pre className="mt-2 bg-gray-50 p-3 rounded border text-xs overflow-auto text-gray-800 dark:text-gray-200 dark:bg-gray-900 dark:border-gray-700">{JSON.stringify(result, null, 2)}</pre>
+            )}
           </div>
         )}
       </div>
