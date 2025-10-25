@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getToken } from '../lib/api';
+import { api, getToken } from '../lib/api';
 import * as XLSX from 'xlsx';
 import { useSharedDataContext } from '../contexts/SharedDataContext';
 import { useSphThresholds } from '../hooks/useSphThresholds';
@@ -352,6 +352,18 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'excellent' | 'review'>('all');
   const { thresholds, setThresholds, defaults: thresholdDefaults } = useSphThresholds();
   const [showThresholdEditor, setShowThresholdEditor] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const me = await api<any>('/auth/me');
+        if (!cancelled) setIsAdmin(Boolean(me?.is_admin));
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const filteredPerformanceData = useMemo(() => {
     const rangeStart = normalizeDate(dateRange.start).getTime();
@@ -711,14 +723,16 @@ export default function Dashboard() {
             <div>
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-medium text-gray-700 mb-1">Status</label>
-                <button
-                  type="button"
-                  title="Edit SPH thresholds"
-                  onClick={() => setShowThresholdEditor(v => !v)}
-                  className="text-xs text-blue-600 hover:text-blue-800"
-                >
-                  Edit thresholds
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    title="Edit SPH thresholds"
+                    onClick={() => setShowThresholdEditor(v => !v)}
+                    className="text-xs text-blue-600 hover:text-blue-800"
+                  >
+                    Edit thresholds
+                  </button>
+                )}
               </div>
               <select
                 value={statusFilter}
@@ -730,7 +744,7 @@ export default function Dashboard() {
                 <option value="review">⚠️ Needs Review (SPH &lt; ${thresholds.reviewMax})</option>
               </select>
 
-              {showThresholdEditor && (
+              {isAdmin && showThresholdEditor && (
                 <div className="mt-2 p-3 border rounded-lg bg-gray-50">
                   <div className="grid grid-cols-2 gap-3 items-end">
                     <div>
