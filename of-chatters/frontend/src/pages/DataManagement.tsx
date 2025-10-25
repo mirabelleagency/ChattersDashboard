@@ -430,7 +430,7 @@ export default function DataManagement() {
       setSelectedChatterIds([])
       setSuccess(count === 1 ? 'Chatter deleted' : `${count} chatters deleted`)
     } catch (err: any) {
-      setError(err.message || 'Failed to delete selected chatters')
+  setError(err.message || 'Failed to delete selected chatters')
       try {
         const rows = await api<Chatter[]>('/admin/chatters')
         setChatters(rows)
@@ -651,7 +651,7 @@ export default function DataManagement() {
   }
 
   const renderChatters = () => (
-    <Card title="Chatters">
+  <Card title="Chatters">
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="space-y-3">
