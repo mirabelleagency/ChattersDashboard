@@ -6,8 +6,6 @@ import type { Chatter } from '../hooks/useSharedData'
 
 const TABS = [
   { key: 'chatters', label: 'Chatters' },
-  { key: 'shifts', label: 'Shifts' },
-  { key: 'performance', label: 'Performance' },
   { key: 'dashboardMetrics', label: 'Dashboard Metrics' },
   { key: 'offenses', label: 'Misconduct' },
   { key: 'audit', label: 'Audit Logs' },
@@ -239,15 +237,6 @@ export default function DataManagement() {
         if (activeTab === 'chatters') {
           const rows = await api<Chatter[]>('/admin/chatters')
           setChatters(rows)
-        } else if (activeTab === 'shifts') {
-          const rows = await api<ShiftRow[]>('/admin/shifts')
-          setShifts(rows)
-        } else if (activeTab === 'performance') {
-          const params = new URLSearchParams()
-          if (startDate) params.append('start', toIsoDate(startDate))
-          if (endDate) params.append('end', toIsoDate(endDate))
-          const rows = await api<PerformanceRow[]>(`/admin/performance${params.toString() ? `?${params.toString()}` : ''}`)
-          setPerformanceRows(rows)
         } else if (activeTab === 'dashboardMetrics') {
           const params = new URLSearchParams()
           if (startDate) params.append('start', toIsoDate(startDate))
@@ -1184,25 +1173,7 @@ export default function DataManagement() {
                 team_name: ch.team_name,
                 is_active: ch.is_active,
               })))} disabled={!filteredChatters.length}>Export Chatters</Button>
-              <Button variant="secondary" onClick={() => exportAsCSV('shifts_export.csv', filteredShifts.map(shift => ({
-                id: shift.id,
-                chatter_id: shift.chatter_id,
-                shift_date: shift.shift_date,
-                scheduled_hours: shift.scheduled_hours,
-                actual_hours: shift.actual_hours,
-                remarks: shift.remarks,
-              })))} disabled={!filteredShifts.length}>Export Shifts</Button>
-              <Button variant="secondary" onClick={() => exportAsCSV('performance_export.csv', filteredPerformance.map(row => ({
-                id: row.id,
-                chatter_id: row.chatter_id,
-                shift_date: row.shift_date,
-                sales_amount: row.sales_amount,
-                sold_count: row.sold_count,
-                retention_count: row.retention_count,
-                unlock_count: row.unlock_count,
-                total_sales: row.total_sales,
-                sph: row.sph,
-              })))} disabled={!filteredPerformance.length}>Export Performance</Button>
+              
               <Button variant="secondary" onClick={() => exportAsCSV('dashboard_metrics_export.csv', filteredDashboardMetrics.map(metric => ({
                 ranking: metric.ranking,
                 total_sales: metric.total_sales,
@@ -1290,8 +1261,6 @@ export default function DataManagement() {
       {!loading && (
         <>
           {activeTab === 'chatters' && renderChatters()}
-          {activeTab === 'shifts' && renderShifts()}
-          {activeTab === 'performance' && renderPerformance()}
           {activeTab === 'dashboardMetrics' && renderDashboardMetrics()}
           {activeTab === 'offenses' && renderOffenses()}
           {activeTab === 'audit' && renderAuditLogs()}
