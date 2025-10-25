@@ -228,6 +228,12 @@ export default function DataManagement() {
   useEffect(() => {
     setError('')
     setLoading(true)
+    const toIsoDate = (mmdd: string) => {
+      if (!mmdd) return ''
+      const [m, d, y] = mmdd.split('/').map(Number)
+      if (!y || !m || !d) return ''
+      return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    }
     const fetchData = async () => {
       try {
         if (activeTab === 'chatters') {
@@ -238,14 +244,14 @@ export default function DataManagement() {
           setShifts(rows)
         } else if (activeTab === 'performance') {
           const params = new URLSearchParams()
-          if (startDate) params.append('start', startDate)
-          if (endDate) params.append('end', endDate)
+          if (startDate) params.append('start', toIsoDate(startDate))
+          if (endDate) params.append('end', toIsoDate(endDate))
           const rows = await api<PerformanceRow[]>(`/admin/performance${params.toString() ? `?${params.toString()}` : ''}`)
           setPerformanceRows(rows)
         } else if (activeTab === 'dashboardMetrics') {
           const params = new URLSearchParams()
-          if (startDate) params.append('start', startDate)
-          if (endDate) params.append('end', endDate)
+          if (startDate) params.append('start', toIsoDate(startDate))
+          if (endDate) params.append('end', toIsoDate(endDate))
           const rows = await api<DashboardMetricRow[]>(`/admin/dashboard-metrics/summary${params.toString() ? `?${params.toString()}` : ''}`)
           setDashboardMetrics(rows)
         } else if (activeTab === 'offenses') {
@@ -253,8 +259,8 @@ export default function DataManagement() {
           setOffenses(rows)
         } else if (activeTab === 'audit') {
           const params = new URLSearchParams()
-          if (startDate) params.append('start', `${startDate}T00:00:00`)
-          if (endDate) params.append('end', `${endDate}T23:59:59`)
+          if (startDate) params.append('start', `${toIsoDate(startDate)}T00:00:00`)
+          if (endDate) params.append('end', `${toIsoDate(endDate)}T23:59:59`)
           if (auditEntity) params.append('entity', auditEntity)
           if (auditAction) params.append('action', auditAction)
           const rows = await api<AuditLogEntry[]>(`/admin/audit/logs${params.toString() ? `?${params.toString()}` : ''}`)
@@ -304,13 +310,19 @@ export default function DataManagement() {
   }, [allVisibleChattersSelected, someVisibleChattersSelected])
 
   const filteredShifts = useMemo(() => {
+    const parseMMDD = (s: string) => {
+      if (!s) return NaN
+      const [m, d, y] = s.split('/').map(Number)
+      if (!y || !m || !d) return NaN
+      return new Date(y, m - 1, d).getTime()
+    }
     return shifts.filter(shift => {
       const matchesSearch = !searchTerm || shift.remarks?.toLowerCase().includes(searchTerm.toLowerCase())
       const matchesDate = (() => {
         if (!startDate && !endDate) return true
         const shiftDate = shift.shift_date ? new Date(shift.shift_date).getTime() : NaN
-        const start = startDate ? new Date(startDate).getTime() : undefined
-        const end = endDate ? new Date(endDate).getTime() : undefined
+        const start = startDate ? parseMMDD(startDate) : undefined
+        const end = endDate ? parseMMDD(endDate) : undefined
         if (Number.isNaN(shiftDate)) return true
         if (start && shiftDate < start) return false
         if (end && shiftDate > end) return false
@@ -321,13 +333,19 @@ export default function DataManagement() {
   }, [shifts, searchTerm, startDate, endDate])
 
   const filteredPerformance = useMemo(() => {
+    const parseMMDD = (s: string) => {
+      if (!s) return NaN
+      const [m, d, y] = s.split('/').map(Number)
+      if (!y || !m || !d) return NaN
+      return new Date(y, m - 1, d).getTime()
+    }
     return performanceRows.filter(row => {
       const matchesSearch = !searchTerm || String(row.chatter_id).includes(searchTerm)
       const matchesDate = (() => {
         if (!startDate && !endDate) return true
         const rowDate = row.shift_date ? new Date(row.shift_date).getTime() : NaN
-        const start = startDate ? new Date(startDate).getTime() : undefined
-        const end = endDate ? new Date(endDate).getTime() : undefined
+        const start = startDate ? parseMMDD(startDate) : undefined
+        const end = endDate ? parseMMDD(endDate) : undefined
         if (Number.isNaN(rowDate)) return true
         if (start && rowDate < start) return false
         if (end && rowDate > end) return false
@@ -338,6 +356,12 @@ export default function DataManagement() {
   }, [performanceRows, searchTerm, startDate, endDate])
 
   const filteredDashboardMetrics = useMemo(() => {
+    const parseMMDD = (s: string) => {
+      if (!s) return NaN
+      const [m, d, y] = s.split('/').map(Number)
+      if (!y || !m || !d) return NaN
+      return new Date(y, m - 1, d).getTime()
+    }
     const lookup = searchTerm.trim().toLowerCase()
     return dashboardMetrics.filter(row => {
       const matchesSearch = !lookup || row.chatter_name.toLowerCase().includes(lookup) || (row.shift || '').toLowerCase().includes(lookup)
@@ -345,8 +369,8 @@ export default function DataManagement() {
         if (!startDate && !endDate) return true
         const rangeStart = row.start_date ? new Date(row.start_date).getTime() : undefined
         const rangeEnd = row.end_date ? new Date(row.end_date).getTime() : rangeStart
-        const filterStart = startDate ? new Date(startDate).getTime() : undefined
-        const filterEnd = endDate ? new Date(endDate).getTime() : undefined
+        const filterStart = startDate ? parseMMDD(startDate) : undefined
+        const filterEnd = endDate ? parseMMDD(endDate) : undefined
         if (rangeStart === undefined && rangeEnd === undefined) return true
         const effectiveStart = rangeStart ?? rangeEnd
         const effectiveEnd = rangeEnd ?? rangeStart
@@ -384,13 +408,19 @@ export default function DataManagement() {
   }, [filteredDashboardMetrics])
 
   const filteredOffenses = useMemo(() => {
+    const parseMMDD = (s: string) => {
+      if (!s) return NaN
+      const [m, d, y] = s.split('/').map(Number)
+      if (!y || !m || !d) return NaN
+      return new Date(y, m - 1, d).getTime()
+    }
     return offenses.filter(off => {
       const matchesSearch = !searchTerm || (off.offense || '').toLowerCase().includes(searchTerm.toLowerCase())
       const matchesDate = (() => {
         if (!startDate && !endDate) return true
         const offDate = off.offense_date ? new Date(off.offense_date).getTime() : NaN
-        const start = startDate ? new Date(startDate).getTime() : undefined
-        const end = endDate ? new Date(endDate).getTime() : undefined
+        const start = startDate ? parseMMDD(startDate) : undefined
+        const end = endDate ? parseMMDD(endDate) : undefined
         if (Number.isNaN(offDate)) return true
         if (start && offDate < start) return false
         if (end && offDate > end) return false
@@ -1090,11 +1120,11 @@ export default function DataManagement() {
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500">Start Date</label>
-            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full px-3 py-2 border rounded" />
+            <input type="text" placeholder="MM/DD/YYYY" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full px-3 py-2 border rounded" />
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500">End Date</label>
-            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full px-3 py-2 border rounded" />
+            <input type="text" placeholder="MM/DD/YYYY" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full px-3 py-2 border rounded" />
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -1224,11 +1254,11 @@ export default function DataManagement() {
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500">Start Date</label>
-            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-2 border rounded" />
+            <input type="text" placeholder="MM/DD/YYYY" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-2 border rounded" />
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500">End Date</label>
-            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-2 border rounded" />
+            <input type="text" placeholder="MM/DD/YYYY" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-2 border rounded" />
           </div>
         </div>
       </div>
