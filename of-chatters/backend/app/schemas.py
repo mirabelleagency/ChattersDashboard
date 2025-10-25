@@ -342,6 +342,9 @@ class DashboardMetricSnapshot(BaseModel):
     ur: float = 0.0
     ranking: int
     shift: Optional[str] = None
+    # When an override exists in dashboard_metrics, these help the client show/edit it
+    override_id: Optional[int] = None
+    overridden: bool = False
 
     class Config:
         from_attributes = True

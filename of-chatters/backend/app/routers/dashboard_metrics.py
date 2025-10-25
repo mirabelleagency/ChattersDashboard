@@ -120,9 +120,121 @@ def _compute_dashboard_snapshot(db: Session, start: Optional[date], end: Optiona
             )
         )
 
+    # Apply overrides from the dashboard_metrics table and add pure-override rows if missing
+    # 1) Rank initial computed metrics by total sales
     metrics.sort(key=lambda item: item.total_sales, reverse=True)
     for idx, metric in enumerate(metrics, start=1):
         metric.ranking = idx
+
+    # 2) Fetch relevant overrides overlapping the requested window (if any)
+    if metrics:
+        names = {m.chatter_name for m in metrics}
+    else:
+        names = set()
+
+    overrides_q = db.query(models.DashboardMetric)
+    if names:
+        overrides_q = overrides_q.filter(models.DashboardMetric.chatter_name.in_(names))
+    # overlap filter with the requested summary range (if none provided, don't constrain)
+    if start is not None:
+        overrides_q = overrides_q.filter((models.DashboardMetric.end_date.is_(None)) | (models.DashboardMetric.end_date >= start))
+    if end is not None:
+        overrides_q = overrides_q.filter((models.DashboardMetric.start_date.is_(None)) | (models.DashboardMetric.start_date <= end))
+    overrides = overrides_q.all()
+
+    # Helper to check range overlap between snapshot row and override
+    def _ranges_overlap(row_start: Optional[date], row_end: Optional[date], o_start: Optional[date], o_end: Optional[date]) -> bool:
+        # Treat None as open-ended in the appropriate direction, meaning it overlaps
+        # Calculate effective bounds
+        if row_start is None and row_end is None:
+            return True
+        rs = row_start or row_end
+        re = row_end or row_start
+        # If override missing both, treat as full overlap
+        if o_start is None and o_end is None:
+            return True
+        os = o_start or o_end
+        oe = o_end or o_start
+        if rs is not None and oe is not None and oe < rs:
+            return False
+        if re is not None and os is not None and os > re:
+            return False
+        return True
+
+    # Build map of overrides per chatter for quick lookup
+    overrides_by_name = {}
+    for o in overrides:
+        overrides_by_name.setdefault(o.chatter_name, []).append(o)
+
+    # Apply overrides to existing computed rows
+    applied_override_ids: set[int] = set()
+    for m in metrics:
+        o_list = overrides_by_name.get(m.chatter_name, [])
+        chosen = None
+        for o in o_list:
+            if _ranges_overlap(m.start_date, m.end_date, o.start_date, o.end_date):
+                chosen = o
+                break
+        if chosen:
+            # Override numeric/text fields; keep the date range shown from the computed row
+            m.total_sales = float(chosen.total_sales or 0)
+            m.worked_hours = float(chosen.worked_hours or 0)
+            m.sph = float(chosen.sph or 0)
+            m.art = chosen.art
+            m.gr = float(chosen.gr or 0)
+            m.ur = float(chosen.ur or 0)
+            if chosen.ranking is not None:
+                m.ranking = int(chosen.ranking)
+            if chosen.shift is not None:
+                m.shift = chosen.shift
+            m.override_id = int(chosen.id)
+            m.overridden = True
+            applied_override_ids.add(int(chosen.id))
+
+    # Re-rank if any rankings were not explicitly set by override: keep current order by total_sales
+    metrics.sort(key=lambda item: (item.ranking if item.ranking else float('inf'), -item.total_sales))
+    # If many rankings are equal/None, normalize display rank
+    for idx, m in enumerate(metrics, start=1):
+        m.ranking = m.ranking or idx
+
+    # 3) Add any override-only rows (for chatters missing in computed result)
+    extra_overrides_q = db.query(models.DashboardMetric)
+    if start is not None:
+        extra_overrides_q = extra_overrides_q.filter((models.DashboardMetric.end_date.is_(None)) | (models.DashboardMetric.end_date >= start))
+    if end is not None:
+        extra_overrides_q = extra_overrides_q.filter((models.DashboardMetric.start_date.is_(None)) | (models.DashboardMetric.start_date <= end))
+    # Exclude overrides already applied above
+    if applied_override_ids:
+        extra_overrides_q = extra_overrides_q.filter(~models.DashboardMetric.id.in_(applied_override_ids))
+    # Also exclude those whose chatter name is present in computed and overlapped (handled above); keep ones for chatters without any computed data
+    if names:
+        extra_overrides_q = extra_overrides_q.filter(~models.DashboardMetric.chatter_name.in_(names))
+    extra_overrides = extra_overrides_q.all()
+
+    for o in extra_overrides:
+        metrics.append(
+            schemas.DashboardMetricSnapshot(
+                chatter_name=o.chatter_name,
+                total_sales=float(o.total_sales or 0),
+                worked_hours=float(o.worked_hours or 0),
+                start_date=o.start_date,
+                end_date=o.end_date,
+                sph=float(o.sph or 0),
+                art=o.art,
+                gr=float(o.gr or 0),
+                ur=float(o.ur or 0),
+                ranking=int(o.ranking) if o.ranking is not None else 0,
+                shift=o.shift,
+                override_id=int(o.id),
+                overridden=True,
+            )
+        )
+
+    # Final ordering: if explicit rankings exist, sort by ranking; else by total sales desc
+    metrics.sort(key=lambda item: (item.ranking if item.ranking else float('inf'), -item.total_sales))
+    for idx, m in enumerate(metrics, start=1):
+        if not m.ranking or m.ranking == 0:
+            m.ranking = idx
 
     return metrics
 

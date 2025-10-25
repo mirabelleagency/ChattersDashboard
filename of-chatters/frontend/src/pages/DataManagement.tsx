@@ -55,6 +55,8 @@ interface DashboardMetricRow {
   ur: number
   ranking: number
   shift: string | null
+  override_id?: number | null
+  overridden?: boolean
 }
 
 interface OffenseRow {
@@ -164,7 +166,7 @@ function exportAsCSV(filename: string, rows: Record<string, unknown>[]) {
 }
 
 export default function DataManagement() {
-  const { reloadAll: reloadSharedData } = useSharedDataContext()
+  const { reloadAll: reloadSharedData, chatters: sharedChatters } = useSharedDataContext()
   const [activeTab, setActiveTab] = useState<TabKey>('chatters')
   const [chatters, setChatters] = useState<Chatter[]>([])
   const [shifts, setShifts] = useState<ShiftRow[]>([])
@@ -226,6 +228,22 @@ export default function DataManagement() {
   const [bulkResult, setBulkResult] = useState<any>(null)
   const [selectedChatterIds, setSelectedChatterIds] = useState<number[]>([])
   const selectAllChattersRef = useRef<HTMLInputElement | null>(null)
+
+  type MetricOverrideFormState = {
+    id?: number
+    chatter_name: string
+    total_sales: string
+    worked_hours: string
+    sph: string
+    art: string
+    gr: string
+    ur: string
+    ranking: string
+    shift: string
+    start_date: string
+    end_date: string
+  }
+  const [metricForm, setMetricForm] = useState<MetricOverrideFormState | null>(null)
 
   useEffect(() => {
     setError('')
@@ -826,6 +844,129 @@ export default function DataManagement() {
       <div className="flex flex-col gap-4">
         <p className="text-sm text-gray-600">Metrics below are computed directly from performance data and shift records for the selected date range. Update those datasets to change what appears on the dashboard.</p>
 
+        {metricForm && (
+          <div className="rounded border p-4 bg-white">
+            <div className="font-semibold mb-3">{metricForm.id ? 'Edit Override' : 'Create Override'}</div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-600">Chatter</label>
+                <input type="text" disabled value={metricForm.chatter_name} className="w-full px-3 py-2 border rounded bg-gray-50" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600">Start Date</label>
+                <input type="date" value={metricForm.start_date} onChange={e => setMetricForm(prev => prev ? { ...prev, start_date: e.target.value } : prev)} className="w-full px-3 py-2 border rounded" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600">End Date</label>
+                <input type="date" value={metricForm.end_date} onChange={e => setMetricForm(prev => prev ? { ...prev, end_date: e.target.value } : prev)} className="w-full px-3 py-2 border rounded" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600">Total Sales</label>
+                <input type="number" step="0.01" value={metricForm.total_sales} onChange={e => setMetricForm(prev => prev ? { ...prev, total_sales: e.target.value } : prev)} className="w-full px-3 py-2 border rounded" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600">Worked Hours</label>
+                <input type="number" step="0.01" value={metricForm.worked_hours} onChange={e => setMetricForm(prev => prev ? { ...prev, worked_hours: e.target.value } : prev)} className="w-full px-3 py-2 border rounded" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600">SPH</label>
+                <input type="number" step="0.01" value={metricForm.sph} onChange={e => setMetricForm(prev => prev ? { ...prev, sph: e.target.value } : prev)} className="w-full px-3 py-2 border rounded" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600">GR (%)</label>
+                <input type="number" step="0.01" value={metricForm.gr} onChange={e => setMetricForm(prev => prev ? { ...prev, gr: e.target.value } : prev)} className="w-full px-3 py-2 border rounded" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600">UR (%)</label>
+                <input type="number" step="0.01" value={metricForm.ur} onChange={e => setMetricForm(prev => prev ? { ...prev, ur: e.target.value } : prev)} className="w-full px-3 py-2 border rounded" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600">ART</label>
+                <input type="text" placeholder="e.g. 1h 5m 30s" value={metricForm.art} onChange={e => setMetricForm(prev => prev ? { ...prev, art: e.target.value } : prev)} className="w-full px-3 py-2 border rounded" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600">Shift / Team</label>
+                <input type="text" value={metricForm.shift} onChange={e => setMetricForm(prev => prev ? { ...prev, shift: e.target.value } : prev)} className="w-full px-3 py-2 border rounded" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-600">Rank (auto)</label>
+                <input type="number" value={metricForm.ranking} disabled className="w-full px-3 py-2 border rounded bg-gray-50" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <Button onClick={async () => {
+                if (!metricForm) return
+                try {
+                  setLoading(true)
+                  const payload: any = {
+                    chatter_name: metricForm.chatter_name,
+                    total_sales: toNumber(metricForm.total_sales),
+                    worked_hours: toNumber(metricForm.worked_hours),
+                    sph: toNumber(metricForm.sph),
+                    gr: toNumber(metricForm.gr),
+                    ur: toNumber(metricForm.ur),
+                    art: metricForm.art || undefined,
+                    shift: metricForm.shift || undefined,
+                    start_date: metricForm.start_date || undefined,
+                    end_date: metricForm.end_date || undefined,
+                  }
+                  if (metricForm.id) {
+                    await api(`/admin/dashboard-metrics/${metricForm.id}` as any, { method: 'PUT', body: JSON.stringify(payload) })
+                  } else {
+                    await api(`/admin/dashboard-metrics` as any, { method: 'POST', body: JSON.stringify(payload) })
+                  }
+                  setSuccess('Override saved')
+                  setMetricForm(null)
+                  // Refresh the table
+                  const params = new URLSearchParams()
+                  const toIsoDate = (mmdd: string) => {
+                    if (!mmdd) return ''
+                    const [m, d, y] = mmdd.split('/').map(Number)
+                    if (!y || !m || !d) return ''
+                    return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+                  }
+                  if (startDate) params.append('start', toIsoDate(startDate))
+                  if (endDate) params.append('end', toIsoDate(endDate))
+                  const rows = await api<DashboardMetricRow[]>(`/admin/dashboard-metrics/summary${params.toString() ? `?${params.toString()}` : ''}`)
+                  setDashboardMetrics(rows)
+                } catch (e: any) {
+                  setError(e?.message || 'Failed to save override')
+                } finally {
+                  setLoading(false)
+                }
+              }}>Save Override</Button>
+              {metricForm?.id && (
+                <Button variant="secondary" onClick={async () => {
+                  if (!metricForm?.id) return
+                  if (!window.confirm('Delete this override?')) return
+                  try {
+                    setLoading(true)
+                    await api(`/admin/dashboard-metrics/${metricForm.id}`, { method: 'DELETE' })
+                    setSuccess('Override cleared')
+                    setMetricForm(null)
+                    const params = new URLSearchParams()
+                    const toIsoDate = (mmdd: string) => {
+                      if (!mmdd) return ''
+                      const [m, d, y] = mmdd.split('/').map(Number)
+                      if (!y || !m || !d) return ''
+                      return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+                    }
+                    if (startDate) params.append('start', toIsoDate(startDate))
+                    if (endDate) params.append('end', toIsoDate(endDate))
+                    const rows = await api<DashboardMetricRow[]>(`/admin/dashboard-metrics/summary${params.toString() ? `?${params.toString()}` : ''}`)
+                    setDashboardMetrics(rows)
+                  } catch (e: any) {
+                    setError(e?.message || 'Failed to delete override')
+                  } finally {
+                    setLoading(false)
+                  }
+                }}>Clear Override</Button>
+              )}
+              <Button variant="secondary" onClick={() => setMetricForm(null)}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
             <div className="text-xs font-semibold uppercase text-blue-700">Total Sales</div>
@@ -855,6 +996,7 @@ export default function DataManagement() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Shift / Team</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Range</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">ART</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 bg-white">
@@ -872,12 +1014,55 @@ export default function DataManagement() {
                     <td className="px-4 py-3 text-sm text-gray-700">{row.shift || '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">{row.start_date || row.end_date ? `${row.start_date ?? '—'} → ${row.end_date ?? '—'}` : '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">{row.art || '—'}</td>
+                    <td className="px-4 py-3 text-center text-sm">
+                      <div className="flex items-center justify-center gap-3">
+                        <button className="text-blue-600 hover:text-blue-800" onClick={() => setMetricForm({
+                          id: row.override_id ?? undefined,
+                          chatter_name: row.chatter_name,
+                          total_sales: row.total_sales != null ? String(row.total_sales) : '',
+                          worked_hours: row.worked_hours != null ? String(row.worked_hours) : '',
+                          sph: row.sph != null ? String(row.sph) : '',
+                          art: row.art || '',
+                          gr: row.gr != null ? String(row.gr) : '',
+                          ur: row.ur != null ? String(row.ur) : '',
+                          ranking: row.ranking != null ? String(row.ranking) : '',
+                          shift: row.shift || '',
+                          start_date: (row.start_date || '').substring(0, 10),
+                          end_date: (row.end_date || '').substring(0, 10),
+                        })}>Edit</button>
+                        {row.override_id && (
+                          <button className="text-red-600 hover:text-red-800" onClick={async () => {
+                            if (!window.confirm('Clear override for this row?')) return
+                            try {
+                              setLoading(true)
+                              await api(`/admin/dashboard-metrics/${row.override_id}`, { method: 'DELETE' })
+                              setSuccess('Override cleared')
+                              const params = new URLSearchParams()
+                              const toIsoDate = (mmdd: string) => {
+                                if (!mmdd) return ''
+                                const [m, d, y] = mmdd.split('/').map(Number)
+                                if (!y || !m || !d) return ''
+                                return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+                              }
+                              if (startDate) params.append('start', toIsoDate(startDate))
+                              if (endDate) params.append('end', toIsoDate(endDate))
+                              const rows = await api<DashboardMetricRow[]>(`/admin/dashboard-metrics/summary${params.toString() ? `?${params.toString()}` : ''}`)
+                              setDashboardMetrics(rows)
+                            } catch (e: any) {
+                              setError(e?.message || 'Failed to clear override')
+                            } finally {
+                              setLoading(false)
+                            }
+                          }}>Clear</button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 )
               })}
               {!filteredDashboardMetrics.length && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-6 text-center text-sm text-gray-500">No dashboard metrics available for the selected filters.</td>
+                  <td colSpan={11} className="px-4 py-6 text-center text-sm text-gray-500">No dashboard metrics available for the selected filters.</td>
                 </tr>
               )}
             </tbody>
