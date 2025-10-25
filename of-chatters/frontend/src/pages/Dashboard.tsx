@@ -421,7 +421,7 @@ export default function Dashboard() {
   const avgUnlockRate = filteredPerformanceData.length
     ? filteredPerformanceData.reduce((sum, p) => sum + p.ur, 0) / filteredPerformanceData.length
     : 0;
-  const highPerformerCount = filteredPerformanceData.filter(p => p.sph >= 100).length;
+  const highPerformerCount = filteredPerformanceData.filter(p => p.sph >= thresholds.excellentMin).length;
 
   const topPerformersBySPH = filteredPerformanceData
     .slice()
@@ -632,7 +632,7 @@ export default function Dashboard() {
         <Card title="⚠️ Needs Attention">
           <div className="space-y-3">
             {filteredPerformanceData
-              .filter(p => p.sph < 40)
+              .filter(p => p.sph < thresholds.reviewMax)
               .sort((a, b) => a.sph - b.sph)
               .slice(0, 5)
               .map(perf => (
