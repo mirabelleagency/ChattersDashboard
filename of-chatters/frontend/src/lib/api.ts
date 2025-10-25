@@ -1,6 +1,7 @@
 const TOKEN_STORAGE_KEY = 'chatters-dashboard-access-token'
 
 let token: string | null = null
+let refreshPromise: Promise<boolean> | null = null
 
 if (typeof window !== 'undefined') {
   token = window.sessionStorage.getItem(TOKEN_STORAGE_KEY)
@@ -24,6 +25,31 @@ export function clearToken() {
   }
 }
 
+async function singleFlightRefresh(): Promise<boolean> {
+  if (refreshPromise) {
+    return refreshPromise
+  }
+  refreshPromise = (async () => {
+    try {
+      const r = await fetch(`${BASE_URL}/auth/refresh`, { method: 'POST', credentials: 'include' })
+      if (!r.ok) return false
+      const body = await r.json()
+      if (body?.access_token) {
+        setToken(body.access_token)
+        return true
+      }
+      return false
+    } catch {
+      return false
+    }
+  })()
+  try {
+    return await refreshPromise
+  } finally {
+    refreshPromise = null
+  }
+}
+
 // In dev, leave VITE_API_URL undefined to use Vite's proxy (relative URLs).
 // In prod, set VITE_API_URL to your backend base URL.
 const BASE_URL = import.meta.env.VITE_API_URL || ''
@@ -40,32 +66,23 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
 
   const res = await fetch(`${BASE_URL}${path}`, fetchOptions)
   if (res.status === 401) {
-    // Try a silent refresh using the refresh cookie
-    try {
-      const r = await fetch(`${BASE_URL}/auth/refresh`, { method: 'POST', credentials: 'include' })
-      if (r.ok) {
-        const body = await r.json()
-        if (body.access_token) {
-          setToken(body.access_token)
-          // retry original request with the new token
-          headers['Authorization'] = `Bearer ${body.access_token}`
-          const retry = await fetch(`${BASE_URL}${path}`, { ...options, headers, credentials: 'include' })
-          if (!retry.ok) {
-            const text = await retry.text()
-            throw new Error(text || 'Request failed after refresh')
-          }
-          const ct2 = retry.headers.get('content-type') || ''
-          if (ct2.includes('application/json')) return retry.json()
-          // @ts-ignore
-          return undefined
-        }
+    // Try a single-flight silent refresh using the refresh cookie
+    const refreshed = await singleFlightRefresh()
+    if (refreshed) {
+      // retry original request with the new token
+      if (token) headers['Authorization'] = `Bearer ${token}`
+      const retry = await fetch(`${BASE_URL}${path}`, { ...options, headers, credentials: 'include' })
+      if (!retry.ok) {
+        const text = await retry.text()
+        throw new Error(text || 'Request failed after refresh')
       }
-    } catch (e) {
-      // fallthrough to clearing token
+      const ct2 = retry.headers.get('content-type') || ''
+      if (ct2.includes('application/json')) return retry.json()
+      // @ts-ignore
+      return undefined
     }
-    // token invalid or refresh failed
-    token = null
-    // throw a specific error so caller can react (e.g. redirect to /login)
+    // Refresh failed: clear token and propagate Unauthorized
+    clearToken()
     const err: any = new Error('Unauthorized')
     err.name = 'UnauthorizedError'
     throw err
