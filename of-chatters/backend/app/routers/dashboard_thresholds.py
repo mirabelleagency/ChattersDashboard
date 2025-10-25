@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel, Field
 
 from ..db import get_db
@@ -19,9 +20,34 @@ class ThresholdsOut(BaseModel):
     review_max: float
 
 
+def _ensure_thresholds_table(db: Session) -> None:
+    # Create table if missing, and add columns if missing (idempotent, safe for Postgres)
+    db.execute(text(
+        """
+        CREATE TABLE IF NOT EXISTS dashboard_thresholds (
+            id SERIAL PRIMARY KEY,
+            excellent_min NUMERIC(10,2) NOT NULL DEFAULT 100,
+            review_max NUMERIC(10,2) NOT NULL DEFAULT 40,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        """
+    ))
+    # Ensure columns exist (for environments where table existed without columns from an old migration)
+    db.execute(text("ALTER TABLE dashboard_thresholds ADD COLUMN IF NOT EXISTS excellent_min NUMERIC(10,2) NOT NULL DEFAULT 100"))
+    db.execute(text("ALTER TABLE dashboard_thresholds ADD COLUMN IF NOT EXISTS review_max NUMERIC(10,2) NOT NULL DEFAULT 40"))
+    db.execute(text("ALTER TABLE dashboard_thresholds ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()"))
+    db.commit()
+
+
 @router.get("/admin/dashboard-thresholds", response_model=ThresholdsOut)
 def get_thresholds(_: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    row = db.query(models.DashboardThresholds).order_by(models.DashboardThresholds.id.asc()).first()
+    try:
+        row = db.query(models.DashboardThresholds).order_by(models.DashboardThresholds.id.asc()).first()
+    except Exception:
+        # Self-heal schema drift and retry
+        _ensure_thresholds_table(db)
+        row = db.query(models.DashboardThresholds).order_by(models.DashboardThresholds.id.asc()).first()
+
     if not row:
         # create default singleton
         row = models.DashboardThresholds(id=1, excellent_min=100.0, review_max=40.0)
