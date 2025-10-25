@@ -87,21 +87,16 @@ function normalizeDate(date: Date): Date {
 }
 
 function formatDateInput(date: Date): string {
-  // Return MM/DD/YYYY
+  // Return ISO yyyy-mm-dd for native date inputs
+  const yyyy = String(date.getFullYear());
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const dd = String(date.getDate()).padStart(2, '0');
-  const yyyy = String(date.getFullYear());
-  return `${mm}/${dd}/${yyyy}`;
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 function parseDateInput(value: string): Date {
-  // Accept MM/DD/YYYY
-  const parts = value.split('/').map(Number);
-  if (parts.length !== 3 || parts.some(n => Number.isNaN(n))) {
-    // Fallback to Date parsing (may handle localized inputs)
-    return new Date(value);
-  }
-  const [month, day, year] = parts;
+  // Accept ISO yyyy-mm-dd from native date inputs
+  const [year, month, day] = value.split('-').map(Number);
   return new Date(year, (month ?? 1) - 1, day ?? 1);
 }
 
@@ -496,20 +491,18 @@ export default function Dashboard() {
               {showDatePicker && (
                 <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-4 space-y-4 z-20">
                   <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300">Start Date (MM/DD/YYYY)</label>
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300">Start Date</label>
                     <input
-                      type="text"
-                      placeholder="MM/DD/YYYY"
+                      type="date"
                       value={pendingRange.start}
                       onChange={(e) => setPendingRange(prev => ({ ...prev, start: e.target.value }))}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300">End Date (MM/DD/YYYY)</label>
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300">End Date</label>
                     <input
-                      type="text"
-                      placeholder="MM/DD/YYYY"
+                      type="date"
                       value={pendingRange.end}
                       onChange={(e) => setPendingRange(prev => ({ ...prev, end: e.target.value }))}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
