@@ -2,7 +2,7 @@ import argparse
 import csv
 import os
 from datetime import datetime, date
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 from openpyxl import load_workbook
 from sqlalchemy.orm import Session
@@ -73,41 +73,75 @@ def upsert_chatter(db: Session, name: str, team_id: Optional[int]) -> int:
     return c.id
 
 
-def upsert_performance(db: Session, chatter_id: int, team_id: Optional[int], dt: date, row: dict) -> bool:
+def upsert_performance(
+    db: Session,
+    chatter_id: int,
+    team_id: Optional[int],
+    dt: date,
+    row: dict,
+) -> Literal["created", "updated", "skipped"]:
+    payload = {
+        "sales_amount": _to_float(row.get("Sales")),
+        "sold_count": _to_int(row.get("Sold")),
+        "retention_count": _to_int(row.get("Retention")),
+        "unlock_count": _to_int(row.get("Unlock")),
+        "total_sales": _to_float(row.get("Total")),
+        "sph": _to_float(row.get("SPH")),
+        "golden_ratio": _to_float(row.get("Golden ratio")),
+        "hinge_top_up": _to_float(row.get("Hinge top up")),
+        "tricks_tsf": _to_float(row.get("Tricks TSF")),
+    }
+    art_interval = parse_art_interval(row.get("ART"))
+
     existing = (
         db.query(models.PerformanceDaily)
         .filter(models.PerformanceDaily.chatter_id == chatter_id, models.PerformanceDaily.shift_date == dt)
         .first()
     )
     if existing:
-        return False
+        updated = False
+        if team_id and existing.team_id in (None, 0):
+            existing.team_id = team_id
+            updated = True
+
+        for field, value in payload.items():
+            if value is not None and getattr(existing, field) is None:
+                setattr(existing, field, value)
+                updated = True
+
+        if art_interval is not None and existing.art_interval is None:
+            existing.art_interval = art_interval  # type: ignore[assignment]
+            updated = True
+
+        return "updated" if updated else "skipped"
 
     p = models.PerformanceDaily(
         chatter_id=chatter_id,
         team_id=team_id,
         shift_date=dt,
-        sales_amount=_to_float(row.get("Sales")),
-        sold_count=_to_int(row.get("Sold")),
-        retention_count=_to_int(row.get("Retention")),
-        unlock_count=_to_int(row.get("Unlock")),
-        total_sales=_to_float(row.get("Total")),
-        sph=_to_float(row.get("SPH")),
-        golden_ratio=_to_float(row.get("Golden ratio")),
-        hinge_top_up=_to_float(row.get("Hinge top up")),
-        tricks_tsf=_to_float(row.get("Tricks TSF")),
+        **payload,
     )
-    # parse_art_interval returns timedelta or None; acceptable for Interval column
-    p.art_interval = parse_art_interval(row.get("ART"))  # type: ignore[assignment]
+    p.art_interval = art_interval  # type: ignore[assignment]
     db.add(p)
-    return True
+    return "created"
 
 
-def upsert_shift(db: Session, chatter_id: int, team_id: Optional[int], dt: date, row: dict) -> bool:
-    # Create shift if any hours provided
+def upsert_shift(
+    db: Session,
+    chatter_id: int,
+    team_id: Optional[int],
+    dt: date,
+    row: dict,
+) -> Literal["created", "updated", "skipped"]:
     scheduled = _to_float(row.get("Shift Hours (Scheduled)"))
     actual = _to_float(row.get("Shift Hours (Actual)"))
-    if scheduled is None and actual is None:
-        return False
+    remarks = row.get("Remarks/ Note") or None
+    shift_label = (row.get("Day") or row.get("Shift")) or None
+
+    if scheduled is None and actual is None and remarks is None:
+        # Still persist shift label if provided so downstream dashboards can reference it
+        if not shift_label:
+            return "skipped"
 
     existing = (
         db.query(models.Shift)
@@ -115,19 +149,36 @@ def upsert_shift(db: Session, chatter_id: int, team_id: Optional[int], dt: date,
         .first()
     )
     if existing:
-        return False
+        updated = False
+        if team_id and existing.team_id in (None, 0):
+            existing.team_id = team_id
+            updated = True
+        if scheduled is not None and existing.scheduled_hours is None:
+            existing.scheduled_hours = scheduled
+            updated = True
+        if actual is not None and existing.actual_hours is None:
+            existing.actual_hours = actual
+            updated = True
+        if remarks and (existing.remarks is None or existing.remarks.strip() == ""):
+            existing.remarks = remarks
+            updated = True
+        if shift_label and not existing.shift_day:
+            existing.shift_day = shift_label
+            updated = True
+
+        return "updated" if updated else "skipped"
 
     sh = models.Shift(
         chatter_id=chatter_id,
         team_id=team_id,
         shift_date=dt,
-        shift_day=row.get("Day") or None,
+        shift_day=shift_label,
         scheduled_hours=scheduled,
         actual_hours=actual,
-        remarks=row.get("Remarks/ Note") or None,
+        remarks=remarks,
     )
     db.add(sh)
-    return True
+    return "created"
 
 
 def _to_float(v):
@@ -196,7 +247,9 @@ def _import_excel_legacy(db: Session, wb) -> dict:
     teams_created = 0
     chatters_created = 0
     perf_records = 0
+    perf_updates = 0
     shift_records = 0
+    shift_updates = 0
     duplicate_rows: List[dict] = []
 
     for row in ws.iter_rows(min_row=2):
@@ -226,22 +279,28 @@ def _import_excel_legacy(db: Session, wb) -> dict:
         if db.query(models.Chatter).count() > existing_chatter_count:
             chatters_created += 1
 
-        perf_created = upsert_performance(db, chatter_id, team_id, dt, values)
-        if perf_created:
+        perf_status = upsert_performance(db, chatter_id, team_id, dt, values)
+        if perf_status == "created":
             perf_records += 1
+        elif perf_status == "updated":
+            perf_updates += 1
 
         scheduled_present = _to_float(values.get("Shift Hours (Scheduled)")) is not None
         actual_present = _to_float(values.get("Shift Hours (Actual)")) is not None
         shift_attempted = scheduled_present or actual_present
-        shift_created = upsert_shift(db, chatter_id, team_id, dt, values) if shift_attempted else False
-        if shift_created:
-            shift_records += 1
+        shift_status: Literal["created", "updated", "skipped"] = "skipped"
+        if shift_attempted:
+            shift_status = upsert_shift(db, chatter_id, team_id, dt, values)
+            if shift_status == "created":
+                shift_records += 1
+            elif shift_status == "updated":
+                shift_updates += 1
 
-        if not perf_created or (shift_attempted and not shift_created):
+        if perf_status == "skipped" or (shift_attempted and shift_status == "skipped"):
             reasons = []
-            if not perf_created:
+            if perf_status == "skipped":
                 reasons.append("performance already imported")
-            if shift_attempted and not shift_created:
+            if shift_attempted and shift_status == "skipped":
                 reasons.append("shift already imported")
             duplicate_rows.append({
                 "row": row[0].row if row else None,
@@ -255,7 +314,9 @@ def _import_excel_legacy(db: Session, wb) -> dict:
         "teams_created": teams_created,
         "chatters_created": chatters_created,
         "performance_records": perf_records,
+        "performance_updates": perf_updates,
         "shift_records": shift_records,
+        "shift_updates": shift_updates,
         "rows_skipped": len(duplicate_rows),
         "skipped_samples": duplicate_rows[:MAX_DUPLICATE_PREVIEW],
     }
@@ -266,7 +327,9 @@ def _import_csv_legacy(db: Session, path: str) -> dict:
     teams_created = 0
     chatters_created = 0
     perf_records = 0
+    perf_updates = 0
     shift_records = 0
+    shift_updates = 0
     duplicate_rows: List[dict] = []
 
     with open(path, 'r', encoding='utf-8-sig', newline='') as f:
@@ -299,22 +362,28 @@ def _import_csv_legacy(db: Session, path: str) -> dict:
             if db.query(models.Chatter).count() > existing_chatter_count:
                 chatters_created += 1
 
-            perf_created = upsert_performance(db, chatter_id, team_id, dt, values)
-            if perf_created:
+            perf_status = upsert_performance(db, chatter_id, team_id, dt, values)
+            if perf_status == "created":
                 perf_records += 1
+            elif perf_status == "updated":
+                perf_updates += 1
 
             scheduled_present = _to_float(values.get("Shift Hours (Scheduled)")) is not None
             actual_present = _to_float(values.get("Shift Hours (Actual)")) is not None
             shift_attempted = scheduled_present or actual_present
-            shift_created = upsert_shift(db, chatter_id, team_id, dt, values) if shift_attempted else False
-            if shift_created:
-                shift_records += 1
+            shift_status: Literal["created", "updated", "skipped"] = "skipped"
+            if shift_attempted:
+                shift_status = upsert_shift(db, chatter_id, team_id, dt, values)
+                if shift_status == "created":
+                    shift_records += 1
+                elif shift_status == "updated":
+                    shift_updates += 1
 
-            if not perf_created or (shift_attempted and not shift_created):
+            if perf_status == "skipped" or (shift_attempted and shift_status == "skipped"):
                 reasons = []
-                if not perf_created:
+                if perf_status == "skipped":
                     reasons.append("performance already imported")
-                if shift_attempted and not shift_created:
+                if shift_attempted and shift_status == "skipped":
                     reasons.append("shift already imported")
                 duplicate_rows.append({
                     "row": row_idx,
@@ -328,7 +397,9 @@ def _import_csv_legacy(db: Session, path: str) -> dict:
         "teams_created": teams_created,
         "chatters_created": chatters_created,
         "performance_records": perf_records,
+        "performance_updates": perf_updates,
         "shift_records": shift_records,
+        "shift_updates": shift_updates,
         "rows_skipped": len(duplicate_rows),
         "skipped_samples": duplicate_rows[:MAX_DUPLICATE_PREVIEW],
     }
@@ -344,7 +415,9 @@ def _import_excel_new(db: Session, wb, ws) -> dict:
 
     chatters_created = 0
     perf_records = 0
+    perf_updates = 0
     shift_records = 0
+    shift_updates = 0
     duplicate_rows: List[dict] = []
 
     for row in ws.iter_rows(min_row=2):
@@ -352,11 +425,12 @@ def _import_excel_new(db: Session, wb, ws) -> dict:
         chatter_name = (str(val.get('Chatter')).strip() if val.get('Chatter') not in (None, '') else None)
         start_date = val.get('Start Date')
         total_sales = _to_float(val.get('Total Sales'))
-        worked_hrs = _to_float(val.get('Worked Hrs')) or 0.0
-        sph = _to_float(val.get('SPH')) or 0.0
+        worked_hrs = _to_float(val.get('Worked Hrs'))
+        sph = _to_float(val.get('SPH'))
         art = val.get('ART')
         gr = _to_float(val.get('GR'))
         ur = _to_float(val.get('UR'))
+        shift_label = (val.get('Shift') or '').strip() or None
 
         if not chatter_name or not start_date:
             continue
@@ -391,25 +465,33 @@ def _import_excel_new(db: Session, wb, ws) -> dict:
             "Shift Hours (Actual)": worked_hrs,
             "Shift Hours (Scheduled)": None,
             "Remarks/ Note": None,
+            "Shift": shift_label,
+            "Day": shift_label,
         }
 
-        perf_created = upsert_performance(db, chatter_id, None, dt, values)
-        if perf_created:
+        perf_status = upsert_performance(db, chatter_id, None, dt, values)
+        if perf_status == "created":
             perf_records += 1
+        elif perf_status == "updated":
+            perf_updates += 1
 
-        shift_attempted = worked_hrs is not None
-        shift_created = upsert_shift(db, chatter_id, None, dt, values) if shift_attempted else False
-        if shift_created:
-            shift_records += 1
+        shift_attempted = (worked_hrs is not None) or (shift_label is not None)
+        shift_status: Literal["created", "updated", "skipped"] = "skipped"
+        if shift_attempted:
+            shift_status = upsert_shift(db, chatter_id, None, dt, values)
+            if shift_status == "created":
+                shift_records += 1
+            elif shift_status == "updated":
+                shift_updates += 1
 
-        if not perf_created or (shift_attempted and not shift_created):
+        if perf_status == "skipped" or (shift_attempted and shift_status == "skipped"):
             duplicate_rows.append({
                 "row": row[0].row if row else None,
                 "chatter": chatter_name,
                 "date": dt.isoformat(),
                 "details": ", ".join(filter(None, [
-                    None if perf_created else "performance already imported",
-                    None if (not shift_attempted or shift_created) else "shift already imported",
+                    None if perf_status != "skipped" else "performance already imported",
+                    None if (not shift_attempted or shift_status != "skipped") else "shift already imported",
                 ])),
             })
 
@@ -418,7 +500,9 @@ def _import_excel_new(db: Session, wb, ws) -> dict:
         "teams_created": 0,
         "chatters_created": chatters_created,
         "performance_records": perf_records,
+        "performance_updates": perf_updates,
         "shift_records": shift_records,
+        "shift_updates": shift_updates,
         "rows_skipped": len(duplicate_rows),
         "skipped_samples": duplicate_rows[:MAX_DUPLICATE_PREVIEW],
     }
@@ -427,7 +511,9 @@ def _import_excel_new(db: Session, wb, ws) -> dict:
 def _import_csv_new(db: Session, path: str) -> dict:
     chatters_created = 0
     perf_records = 0
+    perf_updates = 0
     shift_records = 0
+    shift_updates = 0
     duplicate_rows: List[dict] = []
 
     with open(path, 'r', encoding='utf-8-sig', newline='') as f:
@@ -441,11 +527,12 @@ def _import_csv_new(db: Session, path: str) -> dict:
             chatter_name = (val.get('Chatter') or '').strip() or None
             start_date = val.get('Start Date')
             total_sales = _to_float(val.get('Total Sales'))
-            worked_hrs = _to_float(val.get('Worked Hrs')) or 0.0
-            sph = _to_float(val.get('SPH')) or 0.0
+            worked_hrs = _to_float(val.get('Worked Hrs'))
+            sph = _to_float(val.get('SPH'))
             art = val.get('ART')
             gr = _to_float(val.get('GR'))
             ur = _to_float(val.get('UR'))
+            shift_label = (val.get('Shift') or '').strip() or None
             if not chatter_name or not start_date:
                 continue
 
@@ -478,25 +565,33 @@ def _import_csv_new(db: Session, path: str) -> dict:
                 "Shift Hours (Actual)": worked_hrs,
                 "Shift Hours (Scheduled)": None,
                 "Remarks/ Note": None,
+                "Shift": shift_label,
+                "Day": shift_label,
             }
 
-            perf_created = upsert_performance(db, chatter_id, None, dt, values)
-            if perf_created:
+            perf_status = upsert_performance(db, chatter_id, None, dt, values)
+            if perf_status == "created":
                 perf_records += 1
+            elif perf_status == "updated":
+                perf_updates += 1
 
-            shift_attempted = worked_hrs is not None
-            shift_created = upsert_shift(db, chatter_id, None, dt, values) if shift_attempted else False
-            if shift_created:
-                shift_records += 1
+            shift_attempted = (worked_hrs is not None) or (shift_label is not None)
+            shift_status: Literal["created", "updated", "skipped"] = "skipped"
+            if shift_attempted:
+                shift_status = upsert_shift(db, chatter_id, None, dt, values)
+                if shift_status == "created":
+                    shift_records += 1
+                elif shift_status == "updated":
+                    shift_updates += 1
 
-            if not perf_created or (shift_attempted and not shift_created):
+            if perf_status == "skipped" or (shift_attempted and shift_status == "skipped"):
                 duplicate_rows.append({
                     "row": row_idx,
                     "chatter": chatter_name,
                     "date": dt.isoformat(),
                     "details": ", ".join(filter(None, [
-                        None if perf_created else "performance already imported",
-                        None if (not shift_attempted or shift_created) else "shift already imported",
+                        None if perf_status != "skipped" else "performance already imported",
+                        None if (not shift_attempted or shift_status != "skipped") else "shift already imported",
                     ])),
                 })
 
@@ -505,7 +600,9 @@ def _import_csv_new(db: Session, path: str) -> dict:
         "teams_created": 0,
         "chatters_created": chatters_created,
         "performance_records": perf_records,
+        "performance_updates": perf_updates,
         "shift_records": shift_records,
+        "shift_updates": shift_updates,
         "rows_skipped": len(duplicate_rows),
         "skipped_samples": duplicate_rows[:MAX_DUPLICATE_PREVIEW],
     }

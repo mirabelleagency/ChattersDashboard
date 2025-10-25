@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Button, Badge } from '../components'
 import { api, getToken } from '../lib/api'
 import type { Chatter } from '../hooks/useSharedData'
@@ -7,6 +7,7 @@ const TABS = [
   { key: 'chatters', label: 'Chatters' },
   { key: 'shifts', label: 'Shifts' },
   { key: 'performance', label: 'Performance' },
+  { key: 'dashboardMetrics', label: 'Dashboard Metrics' },
   { key: 'offenses', label: 'Misconduct' },
   { key: 'audit', label: 'Audit Logs' },
   { key: 'imports', label: 'Bulk Import / Export' },
@@ -41,6 +42,20 @@ interface PerformanceRow {
   tricks_tsf?: number | null
   conversion_rate?: number | null
   unlock_ratio?: number | null
+}
+
+interface DashboardMetricRow {
+  chatter_name: string
+  total_sales: number
+  worked_hours: number
+  start_date: string | null
+  end_date: string | null
+  sph: number
+  art: string | null
+  gr: number
+  ur: number
+  ranking: number
+  shift: string | null
 }
 
 interface OffenseRow {
@@ -154,6 +169,7 @@ export default function DataManagement() {
   const [chatters, setChatters] = useState<Chatter[]>([])
   const [shifts, setShifts] = useState<ShiftRow[]>([])
   const [performanceRows, setPerformanceRows] = useState<PerformanceRow[]>([])
+  const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetricRow[]>([])
   const [offenses, setOffenses] = useState<OffenseRow[]>([])
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([])
 
@@ -204,6 +220,8 @@ export default function DataManagement() {
 
   const [bulkFile, setBulkFile] = useState<File | null>(null)
   const [bulkResult, setBulkResult] = useState<any>(null)
+  const [selectedChatterIds, setSelectedChatterIds] = useState<number[]>([])
+  const selectAllChattersRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     setError('')
@@ -222,6 +240,12 @@ export default function DataManagement() {
           if (endDate) params.append('end', endDate)
           const rows = await api<PerformanceRow[]>(`/admin/performance${params.toString() ? `?${params.toString()}` : ''}`)
           setPerformanceRows(rows)
+        } else if (activeTab === 'dashboardMetrics') {
+          const params = new URLSearchParams()
+          if (startDate) params.append('start', startDate)
+          if (endDate) params.append('end', endDate)
+          const rows = await api<DashboardMetricRow[]>(`/admin/dashboard-metrics/summary${params.toString() ? `?${params.toString()}` : ''}`)
+          setDashboardMetrics(rows)
         } else if (activeTab === 'offenses') {
           const rows = await api<OffenseRow[]>(`/admin/offenses/`)
           setOffenses(rows)
@@ -244,6 +268,13 @@ export default function DataManagement() {
   }, [activeTab, startDate, endDate, auditEntity, auditAction])
 
   useEffect(() => {
+    setSelectedChatterIds(prev => {
+      const remaining = prev.filter(id => chatters.some(ch => ch.id === id))
+      return remaining.length === prev.length ? prev : remaining
+    })
+  }, [chatters])
+
+  useEffect(() => {
     if (!success) return
     const timer = setTimeout(() => setSuccess(''), 2000)
     return () => clearTimeout(timer)
@@ -253,6 +284,22 @@ export default function DataManagement() {
     if (!searchTerm) return chatters
     return chatters.filter(ch => ch.name.toLowerCase().includes(searchTerm.toLowerCase()) || (ch.email || '').toLowerCase().includes(searchTerm.toLowerCase()))
   }, [chatters, searchTerm])
+
+  const allVisibleChattersSelected = useMemo(() => {
+    if (!filteredChatters.length) return false
+    return filteredChatters.every(ch => selectedChatterIds.includes(ch.id))
+  }, [filteredChatters, selectedChatterIds])
+
+  const someVisibleChattersSelected = useMemo(() => {
+    if (!filteredChatters.length) return false
+    return filteredChatters.some(ch => selectedChatterIds.includes(ch.id))
+  }, [filteredChatters, selectedChatterIds])
+
+  useEffect(() => {
+    if (selectAllChattersRef.current) {
+      selectAllChattersRef.current.indeterminate = !allVisibleChattersSelected && someVisibleChattersSelected
+    }
+  }, [allVisibleChattersSelected, someVisibleChattersSelected])
 
   const filteredShifts = useMemo(() => {
     return shifts.filter(shift => {
@@ -288,6 +335,52 @@ export default function DataManagement() {
     })
   }, [performanceRows, searchTerm, startDate, endDate])
 
+  const filteredDashboardMetrics = useMemo(() => {
+    const lookup = searchTerm.trim().toLowerCase()
+    return dashboardMetrics.filter(row => {
+      const matchesSearch = !lookup || row.chatter_name.toLowerCase().includes(lookup) || (row.shift || '').toLowerCase().includes(lookup)
+      const matchesDate = (() => {
+        if (!startDate && !endDate) return true
+        const rangeStart = row.start_date ? new Date(row.start_date).getTime() : undefined
+        const rangeEnd = row.end_date ? new Date(row.end_date).getTime() : rangeStart
+        const filterStart = startDate ? new Date(startDate).getTime() : undefined
+        const filterEnd = endDate ? new Date(endDate).getTime() : undefined
+        if (rangeStart === undefined && rangeEnd === undefined) return true
+        const effectiveStart = rangeStart ?? rangeEnd
+        const effectiveEnd = rangeEnd ?? rangeStart
+        if (filterStart && effectiveEnd !== undefined && effectiveEnd < filterStart) return false
+        if (filterEnd && effectiveStart !== undefined && effectiveStart > filterEnd) return false
+        return true
+      })()
+      return matchesSearch && matchesDate
+    })
+  }, [dashboardMetrics, searchTerm, startDate, endDate])
+
+  const dashboardMetricsSummary = useMemo(() => {
+    if (!filteredDashboardMetrics.length) {
+      return null
+    }
+    const totals = filteredDashboardMetrics.reduce(
+      (acc, row) => {
+        acc.totalSales += row.total_sales ?? 0
+        acc.workedHours += row.worked_hours ?? 0
+        acc.sph += row.sph ?? 0
+        acc.gr += row.gr ?? 0
+        acc.ur += row.ur ?? 0
+        return acc
+      },
+      { totalSales: 0, workedHours: 0, sph: 0, gr: 0, ur: 0 }
+    )
+    const count = filteredDashboardMetrics.length
+    return {
+      totalSales: totals.totalSales,
+      workedHours: totals.workedHours,
+      avgSph: totals.sph / count,
+      avgGr: totals.gr / count,
+      avgUr: totals.ur / count,
+    }
+  }, [filteredDashboardMetrics])
+
   const filteredOffenses = useMemo(() => {
     return offenses.filter(off => {
       const matchesSearch = !searchTerm || (off.offense || '').toLowerCase().includes(searchTerm.toLowerCase())
@@ -304,6 +397,50 @@ export default function DataManagement() {
       return matchesSearch && matchesDate
     })
   }, [offenses, searchTerm, startDate, endDate])
+
+  const toggleChatterSelection = (id: number) => {
+    setSelectedChatterIds(prev => (prev.includes(id) ? prev.filter(existing => existing !== id) : [...prev, id]))
+  }
+
+  const handleSelectAllChatters = () => {
+    if (!filteredChatters.length) return
+    setSelectedChatterIds(prev => {
+      const visibleIds = filteredChatters.map(ch => ch.id)
+      const allSelected = visibleIds.every(id => prev.includes(id))
+      if (allSelected) {
+        return prev.filter(id => !visibleIds.includes(id))
+      }
+      const next = new Set(prev)
+      visibleIds.forEach(id => next.add(id))
+      return Array.from(next)
+    })
+  }
+
+  async function handleBulkDeleteChatters() {
+    if (!selectedChatterIds.length) return
+    const count = selectedChatterIds.length
+    if (!window.confirm(`Delete ${count} selected chatter${count === 1 ? '' : 's'}? This action cannot be undone.`)) return
+    const ids = [...selectedChatterIds]
+    try {
+      setLoading(true)
+      for (const id of ids) {
+        await api(`/admin/chatters/${id}?soft=false`, { method: 'DELETE' })
+      }
+      setChatters(prev => prev.filter(ch => !ids.includes(ch.id)))
+      setSelectedChatterIds([])
+      setSuccess(count === 1 ? 'Chatter deleted' : `${count} chatters deleted`)
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete selected chatters')
+      try {
+        const rows = await api<Chatter[]>('/admin/chatters')
+        setChatters(rows)
+      } catch {
+        // ignore refresh errors; stale data will be retried on next load
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const resetForms = () => {
     setChatterForm({ name: '', handle: '', email: '', phone: '', team_name: '', external_id: '', is_active: true })
@@ -347,6 +484,7 @@ export default function DataManagement() {
       setLoading(true)
       await api(`/admin/chatters/${id}?soft=false`, { method: 'DELETE' })
       setChatters(prev => prev.filter(ch => ch.id !== id))
+      setSelectedChatterIds(prev => prev.filter(selectedId => selectedId !== id))
       setSuccess('Chatter deleted')
     } catch (err: any) {
       setError(err.message || 'Failed to delete chatter')
@@ -552,44 +690,142 @@ export default function DataManagement() {
               <Button variant="secondary" onClick={() => setChatterForm({ name: '', handle: '', email: '', phone: '', team_name: '', external_id: '', is_active: true })} disabled={loading}>Clear</Button>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Email</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Team</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
-                  <th className="px-4 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filteredChatters.map(ch => (
-                  <tr key={ch.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 text-sm">{ch.name}</td>
-                    <td className="px-4 py-2 text-sm">{ch.email || '-'}</td>
-                    <td className="px-4 py-2 text-sm">{ch.team_name || '-'}</td>
-                    <td className="px-4 py-2">
-                      <Badge variant={ch.is_active ? 'success' : 'default'}>{ch.is_active ? 'Active' : 'Inactive'}</Badge>
-                    </td>
-                    <td className="px-4 py-2 text-center space-x-2">
-                      <button className="text-blue-600 hover:text-blue-800 text-sm" onClick={() => setChatterForm({
-                        id: ch.id,
-                        name: ch.name,
-                        handle: ch.handle || '',
-                        email: ch.email || '',
-                        phone: ch.phone || '',
-                        team_name: ch.team_name || '',
-                        external_id: ch.external_id || '',
-                        is_active: ch.is_active,
-                      })}>Edit</button>
-                      <button className="text-red-600 hover:text-red-800 text-sm" onClick={() => handleDeleteChatter(ch.id)}>Delete</button>
-                    </td>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-500">{selectedChatterIds.length ? `${selectedChatterIds.length} selected` : ' '}</span>
+              <Button variant="danger" size="sm" onClick={handleBulkDeleteChatters} disabled={loading || !selectedChatterIds.length}>
+                Delete Selected
+              </Button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-2 text-center">
+                      <input
+                        ref={selectAllChattersRef}
+                        type="checkbox"
+                        checked={allVisibleChattersSelected}
+                        onChange={handleSelectAllChatters}
+                        disabled={!filteredChatters.length || loading}
+                        aria-label="Select all chatters in view"
+                        className="h-4 w-4 mx-auto"
+                      />
+                    </th>
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Email</th>
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Team</th>
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredChatters.map(ch => {
+                    const isSelected = selectedChatterIds.includes(ch.id)
+                    return (
+                      <tr key={ch.id} className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
+                        <td className="px-4 py-2 text-center align-middle">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleChatterSelection(ch.id)}
+                            disabled={loading}
+                            aria-label={`Select chatter ${ch.name}`}
+                            className="h-4 w-4 mx-auto"
+                          />
+                        </td>
+                        <td className="px-4 py-2 text-sm">{ch.name}</td>
+                        <td className="px-4 py-2 text-sm">{ch.email || '-'}</td>
+                        <td className="px-4 py-2 text-sm">{ch.team_name || '-'}</td>
+                        <td className="px-4 py-2">
+                          <Badge variant={ch.is_active ? 'success' : 'default'}>{ch.is_active ? 'Active' : 'Inactive'}</Badge>
+                        </td>
+                        <td className="px-4 py-2 text-center space-x-2">
+                          <button className="text-blue-600 hover:text-blue-800 text-sm" onClick={() => setChatterForm({
+                            id: ch.id,
+                            name: ch.name,
+                            handle: ch.handle || '',
+                            email: ch.email || '',
+                            phone: ch.phone || '',
+                            team_name: ch.team_name || '',
+                            external_id: ch.external_id || '',
+                            is_active: ch.is_active,
+                          })}>Edit</button>
+                          <button className="text-red-600 hover:text-red-800 text-sm" onClick={() => handleDeleteChatter(ch.id)}>Delete</button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
+        </div>
+      </div>
+    </Card>
+  )
+
+  const renderDashboardMetrics = () => (
+    <Card title="Dashboard Metrics">
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-gray-600">Metrics below are computed directly from performance data and shift records for the selected date range. Update those datasets to change what appears on the dashboard.</p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
+            <div className="text-xs font-semibold uppercase text-blue-700">Total Sales</div>
+            <div className="text-2xl font-bold text-blue-900">{dashboardMetricsSummary ? dashboardMetricsSummary.totalSales.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</div>
+          </div>
+          <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-4">
+            <div className="text-xs font-semibold uppercase text-emerald-700">Worked Hours</div>
+            <div className="text-2xl font-bold text-emerald-900">{dashboardMetricsSummary ? dashboardMetricsSummary.workedHours.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</div>
+          </div>
+          <div className="rounded-lg border border-purple-100 bg-purple-50 p-4">
+            <div className="text-xs font-semibold uppercase text-purple-700">Average SPH</div>
+            <div className="text-2xl font-bold text-purple-900">{dashboardMetricsSummary ? dashboardMetricsSummary.avgSph.toFixed(2) : '—'}</div>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Rank</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Chatter</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Total Sales</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Worked Hours</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">SPH</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">GR</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">UR</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Shift / Team</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Range</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">ART</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200 bg-white">
+              {filteredDashboardMetrics.map(row => {
+                const key = `${row.chatter_name}-${row.ranking}-${row.start_date ?? ''}-${row.end_date ?? ''}`
+                return (
+                  <tr key={key} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm text-gray-700">#{row.ranking ?? '—'}</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-gray-900">{row.chatter_name}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{row.total_sales != null ? row.total_sales.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{row.worked_hours != null ? row.worked_hours.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{row.sph != null ? row.sph.toFixed(2) : '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{row.gr != null ? `${row.gr.toFixed(2)}%` : '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{row.ur != null ? `${row.ur.toFixed(2)}%` : '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{row.shift || '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{row.start_date || row.end_date ? `${row.start_date ?? '—'} → ${row.end_date ?? '—'}` : '—'}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{row.art || '—'}</td>
+                  </tr>
+                )
+              })}
+              {!filteredDashboardMetrics.length && (
+                <tr>
+                  <td colSpan={10} className="px-4 py-6 text-center text-sm text-gray-500">No dashboard metrics available for the selected filters.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </Card>
@@ -925,6 +1161,18 @@ export default function DataManagement() {
                 total_sales: row.total_sales,
                 sph: row.sph,
               })))} disabled={!filteredPerformance.length}>Export Performance</Button>
+              <Button variant="secondary" onClick={() => exportAsCSV('dashboard_metrics_export.csv', filteredDashboardMetrics.map(metric => ({
+                ranking: metric.ranking,
+                total_sales: metric.total_sales,
+                worked_hours: metric.worked_hours,
+                start_date: metric.start_date,
+                end_date: metric.end_date,
+                sph: metric.sph,
+                art: metric.art,
+                gr: metric.gr,
+                ur: metric.ur,
+                shift: metric.shift,
+              })))} disabled={!filteredDashboardMetrics.length}>Export Dashboard Metrics</Button>
               <Button variant="secondary" onClick={() => exportAsCSV('offenses_export.csv', filteredOffenses.map(off => ({
                 id: off.id,
                 chatter_id: off.chatter_id,
@@ -1002,6 +1250,7 @@ export default function DataManagement() {
           {activeTab === 'chatters' && renderChatters()}
           {activeTab === 'shifts' && renderShifts()}
           {activeTab === 'performance' && renderPerformance()}
+          {activeTab === 'dashboardMetrics' && renderDashboardMetrics()}
           {activeTab === 'offenses' && renderOffenses()}
           {activeTab === 'audit' && renderAuditLogs()}
           {activeTab === 'imports' && renderBulkTools()}

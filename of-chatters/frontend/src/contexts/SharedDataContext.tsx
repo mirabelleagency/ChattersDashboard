@@ -7,10 +7,8 @@ interface SharedDataContextType {
   loading: boolean
   error: string
   loadChatters: () => Promise<void>
-  updatePerformance: (chatter: string, updates: Partial<ChatterPerformance>) => void
   updateChatter: (chatterId: number, payload: any) => Promise<Chatter>
   deleteChatter: (chatterId: number, opts?: { soft?: boolean }) => Promise<void>
-  setPerformanceData: React.Dispatch<React.SetStateAction<ChatterPerformance[]>>
 }
 
 const SharedDataContext = createContext<SharedDataContextType | undefined>(undefined)

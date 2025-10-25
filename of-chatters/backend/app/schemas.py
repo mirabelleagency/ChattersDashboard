@@ -287,3 +287,61 @@ class AuditLogOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class DashboardMetricBase(BaseModel):
+    chatter_name: str
+    total_sales: Optional[float] = None
+    worked_hours: Optional[float] = Field(None, description="Total hours worked in the range")
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    sph: Optional[float] = None
+    art: Optional[str] = None
+    gr: Optional[float] = None
+    ur: Optional[float] = None
+    ranking: Optional[int] = None
+    shift: Optional[str] = None
+
+
+class DashboardMetricCreate(DashboardMetricBase):
+    pass
+
+
+class DashboardMetricUpdate(BaseModel):
+    chatter_name: Optional[str] = None
+    total_sales: Optional[float] = None
+    worked_hours: Optional[float] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    sph: Optional[float] = None
+    art: Optional[str] = None
+    gr: Optional[float] = None
+    ur: Optional[float] = None
+    ranking: Optional[int] = None
+    shift: Optional[str] = None
+
+
+class DashboardMetricOut(DashboardMetricBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DashboardMetricSnapshot(BaseModel):
+    chatter_name: str
+    total_sales: float = 0.0
+    worked_hours: float = 0.0
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    sph: float = 0.0
+    art: Optional[str] = None
+    gr: float = 0.0
+    ur: float = 0.0
+    ranking: int
+    shift: Optional[str] = None
+
+    class Config:
+        from_attributes = True

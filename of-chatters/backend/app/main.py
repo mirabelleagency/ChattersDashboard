@@ -14,6 +14,7 @@ from .routers import reports as reports_router
 from .routers import import_data as import_router
 from .routers import audit as audit_router
 from .routers import admin_users as admin_users_router
+from .routers import dashboard_metrics as dashboard_metrics_router
 
 load_dotenv()
 app = FastAPI(title="of-chatters API")
@@ -46,6 +47,7 @@ app.include_router(reports_router.router, prefix="/reports", tags=["reports"])  
 app.include_router(import_router.router, prefix="/admin", tags=["admin:import"])
 app.include_router(audit_router.router, prefix="/admin", tags=["admin:audit"])
 app.include_router(admin_users_router.router, prefix="/admin", tags=["admin:users"])
+app.include_router(dashboard_metrics_router.router)
 
 
 @app.get("/healthz")

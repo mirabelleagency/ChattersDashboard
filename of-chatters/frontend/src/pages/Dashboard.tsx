@@ -151,12 +151,17 @@ function buildTemplateWorkbook(rows: ChatterPerformance[]) {
     'UR',
     'Shift',
   ];
+  const now = new Date();
+  const startIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const endIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const fallbackStart = formatAsMMDDYYYY(startIso);
+  const fallbackEnd = formatAsMMDDYYYY(endIso);
   // Seed example rows (limit to a few)
   const sample = rows.slice(0, 8).map(r => ({
     'Chatter': r.chatter,
     'Total Sales': r.sales,
-    'Start Date': r.start_date ? formatAsMMDDYYYY(r.start_date) : '10/01/2023',
-    'End Date': r.end_date ? formatAsMMDDYYYY(r.end_date) : '10/15/2023',
+    'Start Date': r.start_date ? formatAsMMDDYYYY(r.start_date) : fallbackStart,
+    'End Date': r.end_date ? formatAsMMDDYYYY(r.end_date) : fallbackEnd,
     'Worked Hrs': r.worked_hrs,
     'SPH': r.sph,
     'ART': r.art,
@@ -1040,7 +1045,7 @@ function ImportUpload({ onClose, onImported }: { onClose: () => void; onImported
 
             {/* Stats grid */}
             {result.stats && (
-              <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div className="mt-3 grid grid-cols-2 md:grid-cols-6 gap-3">
                 <div className="rounded-lg border border-gray-200 bg-white p-3 text-center dark:bg-gray-800 dark:border-gray-700">
                   <div className="text-xs text-gray-500 dark:text-gray-400">Teams Created</div>
                   <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{result.stats.teams_created ?? 0}</div>
@@ -1053,10 +1058,22 @@ function ImportUpload({ onClose, onImported }: { onClose: () => void; onImported
                   <div className="text-xs text-gray-500 dark:text-gray-400">Performance Records Added</div>
                   <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{result.stats.performance_records ?? 0}</div>
                 </div>
+                {typeof result.stats.performance_updates === 'number' && (
+                  <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-center text-indigo-900 dark:bg-indigo-900/20 dark:border-indigo-700 dark:text-indigo-200">
+                    <div className="text-xs">Performance Records Updated</div>
+                    <div className="text-lg font-semibold">{result.stats.performance_updates}</div>
+                  </div>
+                )}
                 <div className="rounded-lg border border-gray-200 bg-white p-3 text-center dark:bg-gray-800 dark:border-gray-700">
                   <div className="text-xs text-gray-500 dark:text-gray-400">Shift Records Added</div>
                   <div className="text-lg font-semibold text-gray-900 dark:text-gray-100">{result.stats.shift_records ?? 0}</div>
                 </div>
+                {typeof result.stats.shift_updates === 'number' && (
+                  <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-center text-indigo-900 dark:bg-indigo-900/20 dark:border-indigo-700 dark:text-indigo-200">
+                    <div className="text-xs">Shift Records Updated</div>
+                    <div className="text-lg font-semibold">{result.stats.shift_updates}</div>
+                  </div>
+                )}
                 {typeof result.stats.rows_skipped === 'number' && (
                   <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-center text-yellow-900 dark:bg-yellow-900/20 dark:border-yellow-700 dark:text-yellow-200">
                     <div className="text-xs">Rows Skipped</div>

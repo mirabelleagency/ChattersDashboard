@@ -201,6 +201,29 @@ class AuditLog(Base):
     user = relationship("User")
 
 
+class DashboardMetric(Base):
+    __tablename__ = "dashboard_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chatter_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    total_sales: Mapped[Optional[float]] = mapped_column(Numeric(12, 2), server_default=text("0"))
+    worked_hours: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), server_default=text("0"))
+    start_date: Mapped[Optional[datetime]] = mapped_column(Date)
+    end_date: Mapped[Optional[datetime]] = mapped_column(Date)
+    sph: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
+    art: Mapped[Optional[str]] = mapped_column(String(50))
+    gr: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
+    ur: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
+    ranking: Mapped[Optional[int]] = mapped_column(Integer)
+    shift: Mapped[Optional[str]] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("ix_dashboard_metrics_chatter_name", "chatter_name"),
+    )
+
+
 class Attachment(Base):
     __tablename__ = "attachments"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
