@@ -59,7 +59,7 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {}),
   }
-  if (token) headers['Authorization'] = `Bearer ${token}`
+  // Cookie-based auth: do not attach Authorization header by default
 
   // Ensure cookies are sent for refresh endpoint flows
   const fetchOptions: RequestInit = { ...options, headers, credentials: 'include' }
@@ -70,7 +70,6 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
     const refreshed = await singleFlightRefresh()
     if (refreshed) {
       // retry original request with the new token
-      if (token) headers['Authorization'] = `Bearer ${token}`
       const retry = await fetch(`${BASE_URL}${path}`, { ...options, headers, credentials: 'include' })
       if (!retry.ok) {
         const text = await retry.text()

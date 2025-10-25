@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { setToken } from '../lib/api'
+// Cookie-based auth: no need to store access token in JS anymore
 
 export default function Login() {
   const navigate = useNavigate()
@@ -34,13 +34,10 @@ export default function Login() {
         const text = await res.text()
         throw new Error(text || 'Login failed')
       }
-      const data = await res.json()
-      if (data.access_token) {
-        setToken(data.access_token)
-        navigate(from, { replace: true })
-      } else {
-        throw new Error('No access token received')
-      }
+      // Successful login sets HttpOnly cookies (access + refresh);
+      // no need to store token in JS.
+      try { await res.json() } catch {}
+      navigate(from, { replace: true })
     } catch (err: any) {
       setError('Incorrect email or password')
     } finally {

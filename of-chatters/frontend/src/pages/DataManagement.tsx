@@ -701,14 +701,11 @@ export default function DataManagement() {
       setLoading(true)
       const formData = new FormData()
       formData.append('file', bulkFile)
-      const headers: Record<string, string> = {}
-      const token = getToken()
-      if (token) headers['Authorization'] = `Bearer ${token}`
       const res = await fetch(`${API_BASE}/admin/import/excel`, {
         method: 'POST',
         body: formData,
         credentials: 'include',
-        headers,
+        // Cookie-based auth; no Authorization header needed
       })
       if (!res.ok) {
         const text = await res.text()

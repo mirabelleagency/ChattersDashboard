@@ -1031,7 +1031,7 @@ function ImportUpload({ onClose, onImported }: { onClose: () => void; onImported
         method: 'POST',
         body: form,
         credentials: 'include',
-        headers: getToken() ? { 'Authorization': `Bearer ${getToken()}` } : undefined,
+        // Cookie-based auth; no Authorization header needed
       });
       if (!res.ok) {
         const text = await res.text();

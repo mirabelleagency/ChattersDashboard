@@ -23,7 +23,7 @@ def login_for_access_token(
     user: Optional[models.User] = db.query(models.User).filter(models.User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
-    access_token = create_access_token({"sub": str(user.id)}, expires_delta=timedelta(minutes=60))
+    access_token = create_access_token({"sub": str(user.id)}, expires_delta=timedelta(minutes=15))
     refresh_token = create_refresh_token({"sub": str(user.id)})
     # Use FastAPI Response to set cookies and return JSON
     # Set httpOnly refresh cookie on the provided Response
@@ -68,7 +68,7 @@ def refresh_token(refresh: Optional[str] = Cookie(None), db: Session = Depends(g
     new_rt = models.RefreshToken(jti=new_jti, user_id=user.id, expires_at=(datetime.utcnow() + timedelta(days=7)))
     db.add(new_rt)
     db.commit()
-    access_token = create_access_token({"sub": str(user.id)}, expires_delta=timedelta(minutes=60))
+    access_token = create_access_token({"sub": str(user.id)}, expires_delta=timedelta(minutes=15))
     new_refresh = create_refresh_token({"sub": str(user.id), "jti": new_jti})
     if response is not None:
         response.set_cookie("refresh", new_refresh, httponly=True, max_age=7*24*60*60, path="/")

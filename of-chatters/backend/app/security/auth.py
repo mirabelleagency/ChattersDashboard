@@ -12,7 +12,7 @@ from ..db import get_db
 from .. import models
 
 SECRET_KEY = os.getenv("JWT_SECRET", "change-me")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "480"))
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "15"))
 ALGORITHM = "HS256"
 
 # Use a robust default hashing scheme that doesn't require native extensions on Windows
