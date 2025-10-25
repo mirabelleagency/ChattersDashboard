@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import func
 
 from ..db import get_db
 from .. import models, schemas
@@ -58,3 +59,15 @@ def list_audit_logs(
             )
         )
     return result
+
+
+@router.get("/entities", response_model=list[str])
+def list_audit_entities(db: Session = Depends(get_db)):
+    rows = db.query(models.AuditLog.entity).filter(models.AuditLog.entity.isnot(None)).group_by(models.AuditLog.entity).order_by(models.AuditLog.entity.asc()).all()
+    return [r[0] for r in rows if r and r[0]]
+
+
+@router.get("/actions", response_model=list[str])
+def list_audit_actions(db: Session = Depends(get_db)):
+    rows = db.query(models.AuditLog.action).filter(models.AuditLog.action.isnot(None)).group_by(models.AuditLog.action).order_by(models.AuditLog.action.asc()).all()
+    return [r[0] for r in rows if r and r[0]]

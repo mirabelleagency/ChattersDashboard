@@ -172,6 +172,8 @@ export default function DataManagement() {
   const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetricRow[]>([])
   const [offenses, setOffenses] = useState<OffenseRow[]>([])
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([])
+  const [auditEntities, setAuditEntities] = useState<string[]>([])
+  const [auditActionsOptions, setAuditActionsOptions] = useState<string[]>([])
 
   const [chatterForm, setChatterForm] = useState<ChatterFormState>({
     name: '',
@@ -211,6 +213,8 @@ export default function DataManagement() {
   const [searchTerm, setSearchTerm] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const [auditStartISO, setAuditStartISO] = useState('')
+  const [auditEndISO, setAuditEndISO] = useState('')
   const [auditEntity, setAuditEntity] = useState('')
   const [auditAction, setAuditAction] = useState('')
 
@@ -248,8 +252,8 @@ export default function DataManagement() {
           setOffenses(rows)
         } else if (activeTab === 'audit') {
           const params = new URLSearchParams()
-          if (startDate) params.append('start', `${toIsoDate(startDate)}T00:00:00`)
-          if (endDate) params.append('end', `${toIsoDate(endDate)}T23:59:59`)
+          if (auditStartISO) params.append('start', `${auditStartISO}T00:00:00`)
+          if (auditEndISO) params.append('end', `${auditEndISO}T23:59:59`)
           if (auditEntity) params.append('entity', auditEntity)
           if (auditAction) params.append('action', auditAction)
           const rows = await api<AuditLogEntry[]>(`/admin/audit/logs${params.toString() ? `?${params.toString()}` : ''}`)
@@ -262,7 +266,28 @@ export default function DataManagement() {
       }
     }
     fetchData()
-  }, [activeTab, startDate, endDate, auditEntity, auditAction])
+  }, [activeTab, startDate, endDate, auditStartISO, auditEndISO, auditEntity, auditAction])
+
+  // Load dropdown options when switching to Audit tab
+  useEffect(() => {
+    if (activeTab !== 'audit') return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [entities, actions] = await Promise.all([
+          api<string[]>('/admin/audit/entities'),
+          api<string[]>('/admin/audit/actions'),
+        ])
+        if (!cancelled) {
+          setAuditEntities(entities)
+          setAuditActionsOptions(actions)
+        }
+      } catch (e) {
+        // ignore failure; user can still type
+      }
+    })()
+    return () => { cancelled = true }
+  }, [activeTab])
 
   useEffect(() => {
     setSelectedChatterIds(prev => {
@@ -1101,19 +1126,29 @@ export default function DataManagement() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
             <label className="block text-xs font-semibold text-gray-500">Entity</label>
-            <input type="text" value={auditEntity} onChange={e => setAuditEntity(e.target.value)} className="w-full px-3 py-2 border rounded" placeholder="performance_daily" />
+            <select value={auditEntity} onChange={e => setAuditEntity(e.target.value)} className="w-full px-3 py-2 border rounded">
+              <option value="">All</option>
+              {auditEntities.map(ent => (
+                <option key={ent} value={ent}>{ent}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500">Action</label>
-            <input type="text" value={auditAction} onChange={e => setAuditAction(e.target.value)} className="w-full px-3 py-2 border rounded" placeholder="upsert" />
+            <select value={auditAction} onChange={e => setAuditAction(e.target.value)} className="w-full px-3 py-2 border rounded">
+              <option value="">All</option>
+              {auditActionsOptions.map(act => (
+                <option key={act} value={act}>{act}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500">Start Date</label>
-            <input type="text" placeholder="MM/DD/YYYY" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full px-3 py-2 border rounded" />
+            <input type="date" value={auditStartISO} onChange={e => setAuditStartISO(e.target.value)} className="w-full px-3 py-2 border rounded" />
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500">End Date</label>
-            <input type="text" placeholder="MM/DD/YYYY" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full px-3 py-2 border rounded" />
+            <input type="date" value={auditEndISO} onChange={e => setAuditEndISO(e.target.value)} className="w-full px-3 py-2 border rounded" />
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -1225,11 +1260,19 @@ export default function DataManagement() {
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500">Start Date</label>
-            <input type="text" placeholder="MM/DD/YYYY" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-2 border rounded" />
+            {activeTab === 'audit' ? (
+              <input type="date" value={auditStartISO} onChange={e => setAuditStartISO(e.target.value)} className="px-3 py-2 border rounded" />
+            ) : (
+              <input type="text" placeholder="MM/DD/YYYY" value={startDate} onChange={e => setStartDate(e.target.value)} className="px-3 py-2 border rounded" />
+            )}
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500">End Date</label>
-            <input type="text" placeholder="MM/DD/YYYY" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-2 border rounded" />
+            {activeTab === 'audit' ? (
+              <input type="date" value={auditEndISO} onChange={e => setAuditEndISO(e.target.value)} className="px-3 py-2 border rounded" />
+            ) : (
+              <input type="text" placeholder="MM/DD/YYYY" value={endDate} onChange={e => setEndDate(e.target.value)} className="px-3 py-2 border rounded" />
+            )}
           </div>
         </div>
       </div>
