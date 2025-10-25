@@ -122,14 +122,13 @@ export function useSharedData() {
     await api(`/admin/chatters/${chatterId}?soft=${soft ? 'true' : 'false'}`, {
       method: 'DELETE',
     })
-    setChatters(prev => {
-      const removed = prev.find(c => c.id === chatterId)
-      if (removed) {
-        setMetrics(prevMetrics => prevMetrics.filter(metric => metric.chatter_name !== removed.name))
-      }
-      return prev.filter(c => c.id !== chatterId)
-    })
-  }, [])
+    setChatters(prev => prev.filter(c => c.id !== chatterId))
+    try {
+      await fetchMetrics()
+    } catch (err) {
+      console.error('Failed to refresh dashboard metrics after deleting chatter', err)
+    }
+  }, [fetchMetrics])
 
   return {
     chatters,
@@ -139,5 +138,6 @@ export function useSharedData() {
     loadChatters,
     updateChatter,
     deleteChatter,
+    reloadAll: loadAll,
   }
 }

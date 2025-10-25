@@ -9,6 +9,7 @@ interface SharedDataContextType {
   loadChatters: () => Promise<void>
   updateChatter: (chatterId: number, payload: any) => Promise<Chatter>
   deleteChatter: (chatterId: number, opts?: { soft?: boolean }) => Promise<void>
+  reloadAll: () => Promise<void>
 }
 
 const SharedDataContext = createContext<SharedDataContextType | undefined>(undefined)

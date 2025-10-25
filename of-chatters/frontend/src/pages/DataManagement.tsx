@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, Button, Badge } from '../components'
+import { useSharedDataContext } from '../contexts/SharedDataContext'
 import { api, getToken } from '../lib/api'
 import type { Chatter } from '../hooks/useSharedData'
 
@@ -165,6 +166,7 @@ function exportAsCSV(filename: string, rows: Record<string, unknown>[]) {
 }
 
 export default function DataManagement() {
+  const { reloadAll: reloadSharedData } = useSharedDataContext()
   const [activeTab, setActiveTab] = useState<TabKey>('chatters')
   const [chatters, setChatters] = useState<Chatter[]>([])
   const [shifts, setShifts] = useState<ShiftRow[]>([])
@@ -430,7 +432,7 @@ export default function DataManagement() {
       setSelectedChatterIds([])
       setSuccess(count === 1 ? 'Chatter deleted' : `${count} chatters deleted`)
     } catch (err: any) {
-  setError(err.message || 'Failed to delete selected chatters')
+      setError(err.message || 'Failed to delete selected chatters')
       try {
         const rows = await api<Chatter[]>('/admin/chatters')
         setChatters(rows)
@@ -438,6 +440,11 @@ export default function DataManagement() {
         // ignore refresh errors; stale data will be retried on next load
       }
     } finally {
+      try {
+        await reloadSharedData()
+      } catch (refreshError) {
+        console.error('Failed to refresh shared data after bulk chatter deletion', refreshError)
+      }
       setLoading(false)
     }
   }
@@ -489,6 +496,11 @@ export default function DataManagement() {
     } catch (err: any) {
       setError(err.message || 'Failed to delete chatter')
     } finally {
+      try {
+        await reloadSharedData()
+      } catch (refreshError) {
+        console.error('Failed to refresh shared data after chatter deletion', refreshError)
+      }
       setLoading(false)
     }
   }
