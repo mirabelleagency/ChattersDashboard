@@ -54,12 +54,24 @@ async function singleFlightRefresh(): Promise<boolean> {
 // In prod, set VITE_API_URL to your backend base URL.
 const BASE_URL = import.meta.env.VITE_API_URL || ''
 
+function getCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null
+  const pattern = new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()\[\]\\\/\+^])/g, '\\$1') + '=([^;]*)')
+  const match = document.cookie.match(pattern)
+  return match ? decodeURIComponent(match[1]) : null
+}
+
 export async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {}),
   }
   // Cookie-based auth: do not attach Authorization header by default
+  const method = (options.method || 'GET').toUpperCase()
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    const csrf = getCookie('csrf')
+    if (csrf) headers['X-CSRF-Token'] = csrf
+  }
 
   // Ensure cookies are sent for refresh endpoint flows
   const fetchOptions: RequestInit = { ...options, headers, credentials: 'include' }
@@ -70,6 +82,11 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
     const refreshed = await singleFlightRefresh()
     if (refreshed) {
       // retry original request with the new token
+      // Ensure CSRF header on retry for unsafe methods
+      if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+        const csrf = getCookie('csrf')
+        if (csrf) headers['X-CSRF-Token'] = csrf
+      }
       const retry = await fetch(`${BASE_URL}${path}`, { ...options, headers, credentials: 'include' })
       if (!retry.ok) {
         const text = await retry.text()

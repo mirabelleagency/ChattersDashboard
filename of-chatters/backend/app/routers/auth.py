@@ -1,5 +1,6 @@
 from datetime import timedelta
 from fastapi import Response, Cookie
+import secrets
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -36,9 +37,14 @@ def login_for_access_token(
     # Attach jti to refresh JWT so we can validate server-side
     refresh_token = create_refresh_token({"sub": str(user.id), "jti": jti})
     if response is not None:
-        response.set_cookie("refresh", refresh_token, httponly=True, max_age=7*24*60*60, path="/")
-        # Set access cookie HttpOnly as well for cookie-only flows (server reads it)
-        response.set_cookie("access", access_token, httponly=True, max_age=60*60, path="/")
+        cookie_secure = os.getenv("COOKIE_SECURE", "0") == "1"
+        # Lax prevents most CSRF on simple cross-site navigations; we still add explicit CSRF token below
+        response.set_cookie("refresh", refresh_token, httponly=True, max_age=7*24*60*60, path="/", samesite="lax", secure=cookie_secure)
+        # Access cookie for server-side reads
+        response.set_cookie("access", access_token, httponly=True, max_age=60*60, path="/", samesite="lax", secure=cookie_secure)
+        # CSRF token (readable by JS)
+        csrf = secrets.token_urlsafe(32)
+        response.set_cookie("csrf", csrf, httponly=False, max_age=7*24*60*60, path="/", samesite="lax", secure=cookie_secure)
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -71,8 +77,11 @@ def refresh_token(refresh: Optional[str] = Cookie(None), db: Session = Depends(g
     access_token = create_access_token({"sub": str(user.id)}, expires_delta=timedelta(minutes=15))
     new_refresh = create_refresh_token({"sub": str(user.id), "jti": new_jti})
     if response is not None:
-        response.set_cookie("refresh", new_refresh, httponly=True, max_age=7*24*60*60, path="/")
-        response.set_cookie("access", access_token, httponly=True, max_age=60*60, path="/")
+        cookie_secure = os.getenv("COOKIE_SECURE", "0") == "1"
+        response.set_cookie("refresh", new_refresh, httponly=True, max_age=7*24*60*60, path="/", samesite="lax", secure=cookie_secure)
+        response.set_cookie("access", access_token, httponly=True, max_age=60*60, path="/", samesite="lax", secure=cookie_secure)
+        csrf = secrets.token_urlsafe(32)
+        response.set_cookie("csrf", csrf, httponly=False, max_age=7*24*60*60, path="/", samesite="lax", secure=cookie_secure)
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -81,8 +90,10 @@ def logout(response: Response = None):
     # Revoke refresh token server-side if present
     # Note: we can't read HttpOnly cookie from here directly unless using Request; skip server revoke on logout endpoint for now
     if response is not None:
-        response.delete_cookie("refresh", path="/")
-        response.delete_cookie("access", path="/")
+        cookie_secure = os.getenv("COOKIE_SECURE", "0") == "1"
+        response.delete_cookie("refresh", path="/", samesite="lax")
+        response.delete_cookie("access", path="/", samesite="lax")
+        response.delete_cookie("csrf", path="/", samesite="lax")
     return {"status": "ok"}
 
 

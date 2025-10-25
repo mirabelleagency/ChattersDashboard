@@ -1031,7 +1031,13 @@ function ImportUpload({ onClose, onImported }: { onClose: () => void; onImported
         method: 'POST',
         body: form,
         credentials: 'include',
-        // Cookie-based auth; no Authorization header needed
+        // Cookie-based auth; include CSRF header
+        headers: (() => {
+          const headers: Record<string, string> = {}
+          const m = document.cookie.match(/(?:^|; )csrf=([^;]*)/)
+          if (m) headers['X-CSRF-Token'] = decodeURIComponent(m[1])
+          return headers
+        })(),
       });
       if (!res.ok) {
         const text = await res.text();

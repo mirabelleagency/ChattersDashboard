@@ -1,7 +1,9 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.responses import JSONResponse
 
 from .routers import auth as auth_router
 from .routers import chatters as chatters_router
@@ -36,6 +38,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# CSRF protection middleware for unsafe methods using double-submit token
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+CSRF_EXEMPT_PATHS = {"/auth/token", "/auth/refresh"}
+
+
+async def csrf_protect(request: Request, call_next):
+    if request.method in UNSAFE_METHODS:
+        # Exempt paths used to obtain or refresh tokens
+        if request.url.path not in CSRF_EXEMPT_PATHS:
+            csrf_cookie = request.cookies.get("csrf")
+            csrf_header = request.headers.get("x-csrf-token")
+            if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+                return JSONResponse(status_code=403, content={"detail": "CSRF validation failed"})
+    return await call_next(request)
+
+
+app.add_middleware(BaseHTTPMiddleware, dispatch=csrf_protect)
 
 app.include_router(auth_router.router, prefix="/auth", tags=["auth"])
 app.include_router(chatters_router.router, tags=["chatters"])  # public read-only
