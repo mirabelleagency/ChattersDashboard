@@ -87,14 +87,21 @@ function normalizeDate(date: Date): Date {
 }
 
 function formatDateInput(date: Date): string {
-  const yyyy = date.getFullYear();
+  // Return MM/DD/YYYY
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const dd = String(date.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+  const yyyy = String(date.getFullYear());
+  return `${mm}/${dd}/${yyyy}`;
 }
 
 function parseDateInput(value: string): Date {
-  const [year, month, day] = value.split('-').map(Number);
+  // Accept MM/DD/YYYY
+  const parts = value.split('/').map(Number);
+  if (parts.length !== 3 || parts.some(n => Number.isNaN(n))) {
+    // Fallback to Date parsing (may handle localized inputs)
+    return new Date(value);
+  }
+  const [month, day, year] = parts;
   return new Date(year, (month ?? 1) - 1, day ?? 1);
 }
 
@@ -140,16 +147,17 @@ const SHIFT_COLORS: Record<string, string> = {
 function buildTemplateWorkbook(rows: ChatterPerformance[]) {
   // Required headers per spec (updated: add Total Sales after Chatter, remove Ranking)
   const headers = [
-    'Chatter',
-    'Total Sales',
-    'Start Date',
-    'End Date',
-    'Worked Hrs',
-    'SPH',
-    'ART',
-    'GR',
-    'UR',
-    'Shift',
+    'chatter',
+    'total_sales',
+    'worked_hrs',
+    'start_date',
+    'end_date',
+    'sph',
+    'art',
+    'gr',
+    'ur',
+    'ranking',
+    'shift',
   ];
   const now = new Date();
   const startIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
@@ -172,8 +180,8 @@ function buildTemplateWorkbook(rows: ChatterPerformance[]) {
 
   const ws = XLSX.utils.json_to_sheet(sample, { header: headers });
   // Prepend an instruction row
-  const info = [
-    ['Note: Dates must be mm/dd/yyyy only. Ranking is auto-calculated. Total Sales may be provided or will be computed as Worked Hrs * SPH.'],
+    const info = [
+    ['Note: Dates must be mm/dd/yyyy only. Ranking is auto-calculated. Total Sales may be provided or will be computed as Worked Hrs * SPH. Column abbreviations: GR = Golden Ratio, UR = Unlock Rate.'],
   ];
   const infoSheet = XLSX.utils.aoa_to_sheet(info);
   // Merge info and data by creating a new sheet range
@@ -310,21 +318,12 @@ export default function Dashboard() {
     });
   }, [dateRange]);
 
+  // Keep default date range as current month; do not auto-expand to dataset range
   useEffect(() => {
-    if (initialRangeApplied) {
-      return;
-    }
-    if (!performanceData.length) {
-      return;
-    }
-    const derived = deriveDataRange(performanceData);
-    if (!derived) {
+    if (!initialRangeApplied) {
       setInitialRangeApplied(true);
-      return;
     }
-    setDateRange(derived);
-    setInitialRangeApplied(true);
-  }, [performanceData, initialRangeApplied]);
+  }, [initialRangeApplied]);
 
   const handleToggleDatePicker = () => {
     setPendingRange({
@@ -497,18 +496,20 @@ export default function Dashboard() {
               {showDatePicker && (
                 <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl p-4 space-y-4 z-20">
                   <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300">Start Date</label>
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300">Start Date (MM/DD/YYYY)</label>
                     <input
-                      type="date"
+                      type="text"
+                      placeholder="MM/DD/YYYY"
                       value={pendingRange.start}
                       onChange={(e) => setPendingRange(prev => ({ ...prev, start: e.target.value }))}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300">End Date</label>
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300">End Date (MM/DD/YYYY)</label>
                     <input
-                      type="date"
+                      type="text"
+                      placeholder="MM/DD/YYYY"
                       value={pendingRange.end}
                       onChange={(e) => setPendingRange(prev => ({ ...prev, end: e.target.value }))}
                       className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -797,13 +798,13 @@ export default function Dashboard() {
                   className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
                   <div className="flex items-center justify-end gap-1">
-                    UR
+                    Unlock Rate
                     {sortBy === 'ur' && (
                       <span className="text-blue-600 dark:text-blue-400">{sortDirection === 'asc' ? '↑' : '↓'}</span>
                     )}
                   </div>
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">GR</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Golden Ratio</th>
                 <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
                 <th className="px-6 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
               </tr>

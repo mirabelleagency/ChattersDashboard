@@ -80,11 +80,31 @@ def upsert_performance(
     dt: date,
     row: dict,
 ) -> Literal["created", "updated", "skipped"]:
+    # Interpret incoming 'Unlock' value as either a count or a rate (fraction or percent).
+    raw_unlock = row.get("Unlock")
+    unlock_count_val = _to_int(raw_unlock)
+    unlock_ratio_val = None
+    try:
+        urf = _to_float(raw_unlock)
+        if urf is not None:
+            # If user supplied a percentage like '5' treat as 5% -> 0.05
+            # If user supplied a fraction like 0.05, keep as-is.
+            if urf > 1 and urf <= 100:
+                unlock_ratio_val = urf / 100.0
+            elif 0 <= urf <= 1:
+                unlock_ratio_val = urf
+            else:
+                # values outside expected ranges are ignored for ratio
+                unlock_ratio_val = None
+    except Exception:
+        unlock_ratio_val = None
+
     payload = {
         "sales_amount": _to_float(row.get("Sales")),
         "sold_count": _to_int(row.get("Sold")),
         "retention_count": _to_int(row.get("Retention")),
-        "unlock_count": _to_int(row.get("Unlock")),
+        "unlock_count": unlock_count_val,
+        "unlock_ratio": unlock_ratio_val,
         "total_sales": _to_float(row.get("Total")),
         "sph": _to_float(row.get("SPH")),
         "golden_ratio": _to_float(row.get("Golden ratio")),
@@ -105,9 +125,12 @@ def upsert_performance(
             updated = True
 
         for field, value in payload.items():
-            if value is not None and getattr(existing, field) is None:
-                setattr(existing, field, value)
-                updated = True
+            # allow setting unlock_ratio even if unlock_count exists; respect provided fields
+            if value is not None:
+                # special-case: only overwrite if target field is None to avoid clobbering
+                if getattr(existing, field) is None:
+                    setattr(existing, field, value)
+                    updated = True
 
         if art_interval is not None and existing.art_interval is None:
             existing.art_interval = art_interval  # type: ignore[assignment]
@@ -115,11 +138,13 @@ def upsert_performance(
 
         return "updated" if updated else "skipped"
 
+    # Create new performance record; include unlock_ratio if provided
+    p_kwargs = {k: v for k, v in payload.items() if v is not None}
     p = models.PerformanceDaily(
         chatter_id=chatter_id,
         team_id=team_id,
         shift_date=dt,
-        **payload,
+        **p_kwargs,
     )
     p.art_interval = art_interval  # type: ignore[assignment]
     db.add(p)
