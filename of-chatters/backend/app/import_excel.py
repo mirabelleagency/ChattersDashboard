@@ -634,19 +634,31 @@ def _import_csv_new(db: Session, path: str) -> dict:
 
 
 def _parse_date_flexible(value: str) -> date:
-    """Parse date from common formats into date object."""
-    # Try ISO first
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
-        try:
-            return datetime.strptime(value.strip(), fmt).date()
-        except Exception:
-            pass
-    # Fallback: try to parse as datetime then date
+    """Parse date with preference for mm/dd/yyyy or ISO yyyy-mm-dd.
+
+    Rationale:
+    - Our data entry and templates standardize on MM/DD/YYYY.
+    - Ambiguous day-first formats (DD/MM/YYYY) can corrupt months when day<=12.
+      To avoid this, we no longer auto-accept DD/MM/YYYY for slash-delimited dates.
+    """
+    s = value.strip()
+    # Explicit ISO (yyyy-mm-dd)
     try:
-        return datetime.fromisoformat(value.strip()).date()
+        # Strict ISO first
+        return datetime.strptime(s, "%Y-%m-%d").date()
     except Exception:
         pass
-    raise ValueError(f"Unrecognized date format: {value}")
+    # Strict mm/dd/yyyy for slash dates
+    try:
+        return datetime.strptime(s, "%m/%d/%Y").date()
+    except Exception:
+        pass
+    # As a last resort, attempt Python's ISO-like parser (handles yyyy-mm-ddThh:mm:ss)
+    try:
+        return datetime.fromisoformat(s).date()
+    except Exception:
+        pass
+    raise ValueError(f"Unrecognized date format (expected MM/DD/YYYY or YYYY-MM-DD): {value}")
 
 
 def _parse_mmddyyyy_only(value: str) -> date:
