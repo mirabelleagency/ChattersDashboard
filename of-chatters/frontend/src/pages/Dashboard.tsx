@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { getToken } from '../lib/api';
 import * as XLSX from 'xlsx';
 import { useSharedDataContext } from '../contexts/SharedDataContext';
+import { useSphThresholds } from '../hooks/useSphThresholds';
 import { 
   LineChart, 
   Line, 
@@ -349,6 +350,8 @@ export default function Dashboard() {
   const [sortBy, setSortBy] = useState<'ranking' | 'sales' | 'sph' | 'ur'>('ranking');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [statusFilter, setStatusFilter] = useState<'all' | 'excellent' | 'review'>('all');
+  const { thresholds, setThresholds, defaults: thresholdDefaults } = useSphThresholds();
+  const [showThresholdEditor, setShowThresholdEditor] = useState(false);
 
   const filteredPerformanceData = useMemo(() => {
     const rangeStart = normalizeDate(dateRange.start).getTime();
@@ -432,9 +435,9 @@ export default function Dashboard() {
 
   // Apply status filter
   if (statusFilter === 'excellent') {
-    filteredData = filteredData.filter(p => p.sph >= 100);
+    filteredData = filteredData.filter(p => p.sph >= thresholds.excellentMin);
   } else if (statusFilter === 'review') {
-    filteredData = filteredData.filter(p => p.sph < 40);
+    filteredData = filteredData.filter(p => p.sph < thresholds.reviewMax);
   }
 
   // Apply sorting
@@ -632,7 +635,7 @@ export default function Dashboard() {
                   </div>
                 </div>
               ))}
-            {filteredPerformanceData.filter(p => p.sph < 40).length === 0 && (
+            {filteredPerformanceData.filter(p => p.sph < thresholds.reviewMax).length === 0 && (
               <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                 <div className="text-4xl mb-2">🎉</div>
                 <div>All chatters performing above threshold!</div>
@@ -652,7 +655,7 @@ export default function Dashboard() {
               <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                 {highPerformerCount}
               </div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">SPH ≥ $100</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">SPH ≥ ${thresholds.excellentMin}</div>
             </div>
             <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
               <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Avg Unlock Rate</div>
@@ -704,18 +707,59 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* Status Filter */}
+            {/* Status Filter + Threshold Editor */}
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Status</label>
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-medium text-gray-700 mb-1">Status</label>
+                <button
+                  type="button"
+                  title="Edit SPH thresholds"
+                  onClick={() => setShowThresholdEditor(v => !v)}
+                  className="text-xs text-blue-600 hover:text-blue-800"
+                >
+                  Edit thresholds
+                </button>
+              </div>
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as 'all' | 'excellent' | 'review')}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="all">All Chatters</option>
-                <option value="excellent">🏆 Excellent (SPH &gt;= $100)</option>
-                <option value="review">⚠️ Needs Review (SPH &lt; $40)</option>
+                <option value="excellent">🏆 Excellent (SPH ≥ ${thresholds.excellentMin})</option>
+                <option value="review">⚠️ Needs Review (SPH &lt; ${thresholds.reviewMax})</option>
               </select>
+
+              {showThresholdEditor && (
+                <div className="mt-2 p-3 border rounded-lg bg-gray-50">
+                  <div className="grid grid-cols-2 gap-3 items-end">
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">Excellent min SPH</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={thresholds.excellentMin}
+                        onChange={(e) => setThresholds({ excellentMin: Number(e.target.value) })}
+                        className="w-full px-2 py-1 border rounded"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">Needs Review max SPH</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={thresholds.reviewMax}
+                        onChange={(e) => setThresholds({ reviewMax: Number(e.target.value) })}
+                        className="w-full px-2 py-1 border rounded"
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="text-xs text-gray-500">Defaults: ≥ {thresholdDefaults.excellentMin} for Excellent, &lt; {thresholdDefaults.reviewMax} for Review</div>
+                    <button type="button" className="text-xs text-gray-600 hover:text-gray-900" onClick={() => setShowThresholdEditor(false)}>Close</button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

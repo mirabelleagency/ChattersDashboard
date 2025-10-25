@@ -247,6 +247,15 @@ class SavedReport(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class DashboardThresholds(Base):
+    __tablename__ = "dashboard_thresholds"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    excellent_min: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, server_default=text("100"))
+    review_max: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, server_default=text("40"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
